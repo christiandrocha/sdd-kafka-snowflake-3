@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Define — approved 2026-11-17; Design next | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Design — draft 0.3, awaiting independent review | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)

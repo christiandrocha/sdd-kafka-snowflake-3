@@ -10,6 +10,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / ".claude/sdd/SDD_V3_PACKAGE.md"
+FEATURES = ["COST_GOVERNANCE", "SCD2_RESTAURANTS"]
+PHASES = ["DEFINE", "DESIGN", "BUILD_REPORT", "VALIDATION", "RETRO"]
+
 PARTS = [
     ("Part 1 — Agent rules (`CLAUDE.md`)", "CLAUDE.md"),
     ("Part 2 — SDD lifecycle (`.claude/sdd/README.md`)", ".claude/sdd/README.md"),
@@ -18,15 +21,13 @@ PARTS = [
         "Part 4 — Index, ownership and 15-day plan (`.claude/sdd/_index.md`)",
         ".claude/sdd/_index.md",
     ),
-    (
-        "Part 5 — DEFINE: COST_GOVERNANCE",
-        ".claude/sdd/features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md",
-    ),
-    (
-        "Part 6 — DEFINE: SCD2_RESTAURANTS",
-        ".claude/sdd/features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md",
-    ),
 ]
+# Feature artifacts are included as they come to exist, in lifecycle order.
+for _feature in FEATURES:
+    for _phase in PHASES:
+        _path = f".claude/sdd/features/{_feature}/{_phase}_{_feature}.md"
+        if (ROOT / _path).exists():
+            PARTS.append((f"Part {len(PARTS) + 1} — {_phase}: {_feature}", _path))
 TEMPLATES = ["BRAINSTORM", "DEFINE", "DESIGN", "BUILD_REPORT", "VALIDATION", "SHIPPED", "RETRO"]
 
 
@@ -47,10 +48,11 @@ def demote(text, levels):
 
 
 def build():
-    links = {
-        "(features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md)": f"(#{anchor(PARTS[4][0])})",
-        "(features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md)": f"(#{anchor(PARTS[5][0])})",
-    }
+    links = {}
+    for title, path in PARTS:
+        name = pathlib.Path(path).name
+        links[f"(features/{pathlib.Path(path).parent.name}/{name})"] = f"(#{anchor(title)})"
+        links[f"(./{name})"] = f"(#{anchor(title)})"
     doc = [
         "# sdd-kafka-snowflake-3 — Spec-Driven Development Package",
         "",
