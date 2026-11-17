@@ -66,7 +66,7 @@ query acceleration enabled, and `COMPUTE_WH` had a 300-second auto-suspend; no r
 | REQ-04 | The ten gate tasks run as **serverless** tasks (no `WAREHOUSE`), keeping the `SYSTEM$STREAM_HAS_DATA` condition and the `SP_GATE_DOMAIN` semantics of ADR-0019. | MUST | AT-004 |
 | REQ-05 | The Dagster sensor enforces a minimum interval *N* between `cdc_pipeline_job` runs (env var, default 10 min). Pending rows accumulate and are consumed by the next run — none are lost. | MUST | AT-005, AT-006 |
 | REQ-06 | A deterministic load generator (seeded, fixed burst size and cadence) drives the source database for measurement. | MUST | AT-007 |
-| REQ-07 | A written measurement protocol runs config **A** (v2 settings: Gen2, tasks on the warehouse, no window) and config **B** (v3 settings) under the same load, each for ≥ 48 h, and records credits, resumes and freshness from the views named in *Success Criteria*. | MUST | AT-008 |
+| REQ-07 | A written measurement protocol runs config **A** (v2 settings: Gen2, tasks on the warehouse, no window) and config **B** (v3 settings) under the same load, each for ≥ 48 h, plus a ≥ 6 h no-load window in config B for the idle criterion, and records credits, resumes and freshness from the views named in *Success Criteria*. | MUST | AT-008 |
 | REQ-08 | CI runs `terraform fmt -check`, `validate` and `plan` on every PR; `apply` runs only on `main`, through a protected environment with a required reviewer. | MUST | AT-009 |
 | REQ-09 | The README *What it actually costs* section is rewritten with the measured A/B numbers and the exact queries that produced them. | MUST | AT-010 |
 | REQ-10 | Runbooks: "Kafka connector is down" and "a resource monitor suspended the warehouse". | SHOULD | AT-011 |
@@ -98,7 +98,7 @@ its method. The README states the number we got, not the number we hoped for.
 | ID | Scenario | Given | When | Then |
 |----|----------|-------|------|------|
 | AT-001 | Reproducible infra | Empty v3 namespace on the account | CI applies `main` | All v3 objects exist; a second `plan` shows no changes |
-| AT-002 | Cost settings pinned | Warehouse applied | `SHOW WAREHOUSES LIKE 'CDC_WH_V3'` | `generation` = 1, `resource_constraint` = `STANDARD_GEN_1`, `enable_query_acceleration` = false |
+| AT-002 | Cost settings pinned | Warehouse applied, profile `optimized` | `SHOW WAREHOUSES LIKE '<var.warehouse_name>'` (default `CDC_WH`) | `generation` = 1, `resource_constraint` = `STANDARD_GEN_1`, `enable_query_acceleration` = false |
 | AT-003 | Account cap | Monitors applied | `SHOW RESOURCE MONITORS` | One account-level and one v3-warehouse monitor, thresholds as in Terraform |
 | AT-004 | Serverless gate | Tasks applied, no traffic | `SHOW TASKS IN SCHEMA` + 1 h idle | Tasks have no warehouse; `SERVERLESS_TASK_HISTORY` shows no billable runs while streams are empty |
 | AT-005 | Batching window | A burst every 2 min for 30 min | Sensor runs | `cdc_pipeline_job` runs ≤ ⌈30/N⌉ + 1 times |
@@ -150,7 +150,8 @@ its method. The README states the number we got, not the number we hoped for.
 | Type | Constraint | Impact |
 |------|------------|--------|
 | Timeline | 15 days total; measurement needs ≥ 4 calendar days (Days 8–11) | Build must finish by Day 7, including a protocol dry run |
-| Cost | Measurement budget capped at 15 credits (default, see open items) | The load profile must be sized to fit the cap |
+| Cost | Pipeline-warehouse monitor capped at **25 credits** for the trial (owner decision 2026-11-17; estimate ~16) | The load profile must be sized to fit the cap |
+| Fidelity | Query acceleration stays **off in both configs**, although v2's `CDC_WH` had it on (it never engaged) | Owner decision 2026-11-17: REQ-02 prevails; the deviation is documented in the DESIGN |
 | Technical | v2 is not deployed on this account; config A (v2 settings) must be deployed here for the A/B | The protocol compares A and B on this account only; v2's historical figures (other account) are context, not baseline |
 | Account | Snowflake **trial** account `GWHUBCF-QQ53235` (AWS `sa-east-1`), created 2026-11-17 | Measurement (Days 8–11) must finish before the trial ends, and its credits come out of the trial balance; the repo must document what happens to the demo when the trial expires |
 | Technical | `ACCOUNT_USAGE` views lag behind real time | Results are read after the window closes, not live |
@@ -163,7 +164,7 @@ its method. The README states the number we got, not the number we hoped for.
 |----|------------|------------------|------------|
 | A-001 | Gen1 standard warehouses can still be created in `sa-east-1` | REQ-02 falls back to documenting the Gen2 cost and sizing around it | [x] 2026-11-17 — probe warehouse created with `GENERATION = '1'` reported `generation = 1`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` was rejected |
 | A-002 | The Terraform provider supports the warehouse `GENERATION` property, serverless task and monitor settings | Unsupported settings go through a small, versioned SQL step called by CI, documented as an exception. **Higher risk since 2026-11-17:** `GENERATION` is the newer syntax and provider support must be checked first | [ ] Day 3 |
-| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-28. Balance reported as "400" — confirm whether USD or credits before sizing monitors (DESIGN) |
+| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-28. Balance confirmed: USD 400. Credit price to read before the first apply |
 | A-003 | Serverless tasks bill per second, with no 60-second minimum, at a multiplier near 1 | H1 may fail; the measurement still ships | [ ] Day 2 (rate card) |
 | A-004 | The synthetic load is representative of a bursty CDC workload | Results do not generalize to continuous streaming; the README says so | [ ] By design |
 | A-005 | A and B can run on the same account without interfering | Run them sequentially with v2 paused if interference shows up in the dry run | [ ] Day 7 |
@@ -188,11 +189,11 @@ its method. The README states the number we got, not the number we hoped for.
 | # | Question | Blocking? | Owner | Default |
 |---|----------|-----------|-------|---------|
 | 1 | ~~Canonical resource-monitor values (v2 discrepancy 348/`NEVER` vs 20/`MONTHLY`)~~ | Resolved 2026-11-17 | — | Moot: v3 runs on a new account with **no** resource monitors. Terraform defines the canonical values from scratch; the DESIGN proposes them sized to the trial balance. |
-| 6 | ~~Trial end date and remaining credits~~ | Resolved 2026-11-17 | — | Trial ends 2026-12-17; balance "400" (unit to confirm: USD or credits) |
-| 2 | Batching window *N* | No | Christian | 10 min |
-| 3 | Measurement credit cap | No | Christian | 15 credits |
-| 4 | Terraform state backend | No | Christian | S3 + DynamoDB lock |
-| 5 | Does the measurement isolate each change? | No | — | No: A/B measures the combined effect. The DESIGN estimates each change's share from the metering split (warehouse vs serverless) and says so. |
+| 6 | ~~Trial end date and remaining credits~~ | Resolved 2026-11-17 | — | Trial ends 2026-12-17; balance USD 400 (confirmed); credit price still to read before the first apply |
+| 2 | ~~Batching window *N*~~ | Resolved | — | 10 min (DESIGN Decision 6) |
+| 3 | ~~Measurement credit cap~~ | Resolved 2026-11-17 | — | 25 credits on the pipeline-warehouse monitor |
+| 4 | ~~Terraform state backend~~ | Resolved | — | S3 with native lockfile (DESIGN Decision 12) |
+| 5 | ~~Does the measurement isolate each change?~~ | Resolved | — | No; combined effect measured, shares estimated (DESIGN Decision 13) |
 
 ---
 
@@ -203,6 +204,7 @@ its method. The README states the number we got, not the number we hoped for.
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
 | 1.1 | 2026-11-17 | Christian (with Claude) | New trial account `GWHUBCF-QQ53235`: open question 1 resolved as moot; REQ-02/AT-002 use `GENERATION = '1'` and pin query acceleration off; A-001 validated; A-002 risk raised; A-006 and trial constraint added |
 | 1.2 | 2026-11-17 | Christian | Approved. Scope frozen. |
+| 1.3 | 2026-11-17 | Christian | From the design review, no scope change: AT-002 refers to the configurable warehouse name and is checked in profile `optimized`; idle window added to REQ-07; measurement cap 25 credits; query acceleration off in both configs (documented deviation from v2); open questions 2–6 resolved. |
 
 ---
 

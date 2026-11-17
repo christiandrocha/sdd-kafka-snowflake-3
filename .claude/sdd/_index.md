@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Design — draft 0.3, awaiting independent review | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Design — draft 0.4, review findings applied; awaiting reviewer sign-off | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -36,16 +36,20 @@ runbooks, README with *What it actually costs*.
 |------|-----------------|------------------|-------------|
 | `terraform/` | **Owns** | — | FT-03 reads |
 | `scripts/streams_and_tasks.sql`, `scripts/*.sql` | **Owns** | — | — |
-| `dagster/pipeline/sensors.py`, `jobs.py` | **Owns** | — | — |
+| `dagster/pipeline/sensors.py`, `jobs.py`, `gate.py` | **Owns** | — | — |
+| `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py` | **Owns** | — | — |
+| `terraform/env/dev.tfvars` | **Owns** | — | — |
 | `tests/load/`, `docs/measurement/` | **Owns** | Reads | — |
-| `docs/runbooks/connector-down.md`, `monitor-suspended.md` | **Owns** | — | FT-01 adds `schema-evolution.md` |
+| `docs/runbooks/` (connector-down, monitor-suspended, budget-alert, gate-task-failure, after-trial) | **Owns** | — | FT-01 adds `schema-evolution.md` |
 | `dbt/macros/resolve_cdc.sql` | — | **Owns** | — |
 | `dbt/models/silver/silver_restaurants*.sql` | — | **Owns** | — |
 | `dbt/models/gold/gold_revenue_by_restaurant_version.sql` | — | **Owns** | — |
 | `tests/fixtures/restaurant_changes.*`, `dbt/tests/assert_restaurants_history_*.sql` | — | **Owns** | — |
-| `dbt/dbt_project.yml` | Shared — serialize | Shared — serialize | — |
+| `dbt/dbt_project.yml` | — (no dbt change, DESIGN Decision 3) | Shared — serialize | — |
 | `dbt/models/*/schema.yml` | — | Shared — serialize | FT-01 |
-| `.github/workflows/*.yml` | Shared — serialize | — | FT-03 |
+| `.github/workflows/terraform.yml` (new), `deploy.yml` (delete) | **Owns** | — | — |
+| `.github/workflows/ci.yml` | Shared — serialize | — | FT-03 |
+| `Makefile`, `.env.example` | Shared — serialize | — | FT-02 (`make demo`) |
 | `README.md`, `CLAUDE.md`, `docs/adr/` | Shared — serialize | Shared — serialize | FT-02, FT-04 |
 
 The two features share no owned path. They can be built in parallel; shared files are touched
@@ -75,8 +79,9 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | # | Item | Blocking? | Default if unanswered |
 |---|------|-----------|-----------------------|
 | 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
-| 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor, within the trial balance |
-| 6 | ~~Trial end date~~ — resolved: 2026-12-17. Balance "400": confirm unit (USD or credits) before DESIGN sizes the monitors | Open (unit only) | Assume USD 400 |
+| 2 | ~~Credit budget for the A/B measurement~~ — resolved: 25 credits on the `CDC_WH` monitor (owner decision) | Resolved | — |
+| 6 | ~~Trial end date and balance~~ — resolved: 2026-12-17, USD 400 | Resolved | — |
+| 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (Day 3) | Lower the limits if 60 credits > 50% of the balance |
 | 3 | Repository name | No | `sdd-kafka-snowflake-3` |
 | 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | Terraform state backend | No | S3 bucket + DynamoDB lock in the same AWS account |

@@ -10,8 +10,8 @@
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.2, approved |
-| **Status** | Draft — awaiting independent design review |
+| **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.3, approved |
+| **Status** | Draft 0.4 — review findings applied; awaiting reviewer sign-off |
 
 ---
 
@@ -19,12 +19,16 @@
 
 | # | Finding | Source | Effect on the design |
 |---|---------|--------|----------------------|
-| F1 | The Snowflake Terraform provider added the warehouse `generation` field in **v2.7.0**. | provider release notes v2.7.0 | A-002 resolved for the warehouse: pin provider `>= 2.7`. |
-| F2 | **Resource monitors cover warehouses only.** Serverless features (incl. serverless tasks) are not tracked or suspended by any monitor, account-level included; Snowflake points to **budgets** for those. | Snowflake docs, *Working with resource monitors* | Moving the gate tasks to serverless moves their spend **outside the brake**. Needs a budget and hard caps on the tasks themselves (Decision 5). |
-| F3 | "A nominal charge accrues each time a task evaluates its `WHEN` condition and does not run." | Snowflake docs, `ALTER TASK` | v2's claim "a false `WHEN` costs nothing" (ADR-0019, README) is **approximately** true, not exactly. The idle criterion stays, but the ADR wording must be corrected. |
-| F4 | Serverless task compute is billed per second (rounded up) at a 0.9 multiplier per third-party reading of the consumption table; the official tasks page does not state a minimum billing duration. | Snowflake *Understanding compute cost*; select.dev / getorchestra (multiplier) | A-003 **partially** validated. The 0.9 multiplier is unverified on the official table; the A/B measurement settles it empirically. |
-| F5 | Bronze tables are **created by the Kafka connector** (`enable.schematization=true`), not by DDL. Streams can only be created on tables that exist. | v2 `connectors/snowflake_sink.json`, v2 `deploy.yml` order | Streams and tasks cannot be applied in the same step as the database (Decision 1). |
-| F6 | `CREATE WAREHOUSE … RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. | Live probe on `GWHUBCF-QQ53235` | Already reflected in DEFINE 1.1 REQ-02. |
+| F1 | The Snowflake Terraform provider added the warehouse `generation` field in **v2.7.0**. | provider release notes v2.7.0 | Pin provider `>= 2.7`. |
+| F2 | **Resource monitors cover warehouses only**, account-level included. Serverless spend is tracked by **budgets**. | Snowflake docs, *Working with resource monitors* | Serverless gate tasks leave the monitor's brake (Decision 5). |
+| F3 | "A nominal charge accrues each time a task evaluates its `WHEN` condition and does not run." | Snowflake docs, `ALTER TASK` | v2's "a false `WHEN` costs nothing" is approximate; measured in the idle window (Decision 10). |
+| F4 | Serverless compute billed per second, rounded up; serverless tasks at a 0.9 multiplier per third-party readings of the consumption table; no minimum stated on the tasks page. | Snowflake *Understanding compute cost*; select.dev, getorchestra | A-003 partially validated; the A/B settles it. |
+| F5 | Bronze tables are created by the Kafka connector (`enable.schematization=true`). Streams need existing tables. | v2 connector config, v2 `deploy.yml` order | Two Terraform roots (Decision 1). |
+| F6 | `RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. | Live probe on `GWHUBCF-QQ53235` | DEFINE 1.1 REQ-02. |
+| F7 | Budgets can call a **stored procedure** when actual or projected spend reaches a threshold (custom actions), and another one when the cycle restarts. A custom budget that contains a database monitors the serverless tasks in it. | Snowflake docs, *Custom actions for budgets*; release notes 2025-12-10 and 2026-02-24; *Budgets* | An automatic action that suspends the gate tasks is possible (Decision 5). |
+| F8 | Budget spend data refreshes with a delay: up to ~8 h on the standard tier, ~1 h on a faster tier. | third-party guide (Medium); to confirm in docs at Build | The budget action is a backstop, not a fast brake. |
+| F9 | A resource monitor with `FREQUENCY = NEVER` never resets its used credits. | Snowflake docs, `CREATE RESOURCE MONITOR` | Monitors sized for the whole trial, not per calendar month (Decision 8). |
+| F10 | v2's `CDC_WH` had query acceleration **on** (scale factor 2), read on 2026-08-11; it never engaged in 30 days. `00_account_bootstrap.sql` says `FALSE`, but `CREATE … IF NOT EXISTS` never altered the existing warehouse. | v2 README *Cost governance*, `scripts/snowflake_setup.sql` | Profile A deviates from v2 on this one setting, by owner decision (see Cost profiles). |
 
 ---
 
@@ -33,44 +37,49 @@
 ```text
  GitHub Actions                                   Snowflake trial account GWHUBCF-QQ53235 (AWS sa-east-1)
  ─────────────                                   ─────────────────────────────────────────────────────────
- PR:   fmt · validate · plan (both roots)
- main: apply ── protected env, reviewer ──┐
+ PR (same repo): fmt · validate · plan  ── env snowflake-plan (read-only identity, no reviewer)
+ PR (fork):      fmt · validate only
+ main:           plan → apply           ── env snowflake-dev  (TERRAFORM_SVC, required reviewer)
                                           ▼
-   terraform/platform  ──────────────► DB CDC_POC (BRONZE/SILVER/GOLD/CONFIG) · WH CDC_WH (GENERATION, QA off)
-     (account-level, once)               roles CDC_ROLE / CDC_ROLE_RO · service users · grants
-                                         monitors: wh-level (CDC_WH) + account-level · budget (serverless)
+   terraform/platform  ──────────────► DB CDC_POC (BRONZE/SILVER/GOLD/CONFIG) · CONFIG tables
+     (account-level)                     WH CDC_WH (generation, QA off) · roles · service users · grants
+                                         monitors: CDC_WH + account (FREQUENCY = NEVER)
           │
-          ▼  scripts/bootstrap_config.sql (versioned SQL, CI step): CONFIG tables + TABLE_METADATA seed
+          ▼  scripts/seed_config.sql (CI step): TABLE_METADATA seed — data, not objects
+          ▼  scripts/budget.sql      (CI step): custom budget on CDC_POC + custom action (exception)
           │
-   [ stack up · connectors registered · first CDC rows land → Bronze tables now exist ]   ← F5
+   [ stack up · connectors registered · first CDC rows land → Bronze tables exist ]   ← F5
           │
           ▼
-   terraform/pipeline  ──────────────► CONFIG.SP_GATE_DOMAIN · 10 × stream (append-only) · 10 × gate task
-     (needs Bronze tables)               task_compute = "warehouse" (profile A) | "serverless" (profile B)
+   terraform/pipeline  ──────────────► CONFIG.SP_GATE_DOMAIN · CONFIG.SP_SUSPEND_GATE_TASKS
+     (needs Bronze;                      10 × stream (append-only) · 10 × gate task
+      plan skipped until then)           task_compute = "warehouse" (A) | "serverless" (B)
 
  Local stack (Docker Compose)
  ────────────────────────────
  tests/load/generate_load.py ──► Postgres ──► Debezium ──► Kafka ──► Snowpipe Streaming ──► Bronze
-   (seeded bursts, commit log)                    │                                            │ stream
+   (seeded clusters, commit log)                  │                                            │ stream
                                                   └──► Prometheus ◄── sensor gate (0 credits)  │
                                                                          │                     ▼
                                        Dagster bronze_new_data_sensor ◄── CONFIG.PENDING_RUNS ◄─ gate task
-                                         + batching window N (profile B)
+                                         settle + window N (profile B)
                                                    │
                                                    ▼
                                        cdc_pipeline_job: dbt run + test ──► Silver/Gold ──► PROCESSING_LOG
 ```
 
-**Cost profiles.** One codebase, two profiles selected by variables — the A/B is a configuration
-switch on the same objects, not two deployments (Decision 2):
+**Cost profiles.** One codebase, two profiles selected by a versioned `tfvars` value and one Dagster
+env var — the A/B is a configuration switch on the same objects (Decision 2):
 
 | Setting | Profile A — `baseline` (v2 behaviour) | Profile B — `optimized` (v3) |
 |---------|---------------------------------------|------------------------------|
 | `CDC_WH` generation | `'2'` | `'1'` |
-| Query acceleration | off (v2 already had it off on `CDC_WH`) | off |
-| Gate tasks | on `CDC_WH` | serverless, `XSMALL` cap |
-| Dagster batching window *N* | 0 (none) | 10 min |
+| Query acceleration | **off** — deviation from v2 (F10), owner decision 2026-11-17; v2's never engaged | off |
+| Gate tasks | on `CDC_WH` | serverless, `XSMALL` cap, 10 s timeout |
+| Dagster batching | none (`BATCH_WINDOW_MINUTES=0`, v2 hot cycles) | settle + window *N* = 10 min |
 | Auto-suspend | 60 s | 60 s |
+
+AT-002 (generation 1) is verified in profile B; in profile A it fails by construction.
 
 ---
 
@@ -78,18 +87,19 @@ switch on the same objects, not two deployments (Decision 2):
 
 | Component | Purpose | Technology |
 |-----------|---------|------------|
-| `terraform/platform` | Account-level objects: database, schemas, warehouse, roles, users, grants, monitors, budget | Terraform ≥ 1.11, `snowflakedb/snowflake` ≥ 2.7, < 3.0 |
-| `terraform/pipeline` | Gate procedure, streams and tasks over connector-created Bronze tables | Same provider; `for_each` over the 10 Tier-1 domains |
-| `terraform/modules/…` | None in v3 — two flat roots are easier to review than a module hierarchy at this size | — |
-| `scripts/00_terraform_bootstrap.sql` | One-time, documented manual step: the Terraform service user and its roles (chicken-and-egg) | SQL, run once as `ACCOUNTADMIN` |
-| `scripts/bootstrap_config.sql` | CONFIG tables (`TABLE_METADATA`, `METADATA_HISTORY`, `PROCESSING_LOG`, `PENDING_RUNS`, `STREAM_CONSUMPTION_LOG`) and seed | Versioned SQL run by CI after `platform` apply |
-| `scripts/budget.sql` | Activate the account budget and set its limit (fallback if the provider has no budget resource) | Versioned SQL run by CI |
-| `dagster/pipeline/sensors.py` | Add the batching window to `bronze_new_data_sensor` without reintroducing stranding | Python, Dagster |
-| `dagster/pipeline/gate.py` | Pure decision function for the sensor, unit-testable without Dagster or Snowflake | Python |
-| `tests/load/generate_load.py` | Seeded, fixed-cadence load generator; writes a commit log | Python, psycopg2 |
-| `docs/measurement/` | Protocol, queries, results template | Markdown + SQL |
-| `docs/runbooks/` | Connector down; monitor suspended the warehouse; budget alert fired | Markdown |
-| `.github/workflows/terraform.yml` | Plan on PR, apply on `main` through a protected environment | GitHub Actions |
+| `terraform/platform` | Database, schemas, CONFIG tables, warehouse, roles, users, grants, monitors | Terraform ≥ 1.11, `snowflakedb/snowflake` ≥ 2.7, < 3.0 |
+| `terraform/pipeline` | Gate and suspend procedures, streams, tasks over connector-created Bronze tables | Same provider; `for_each` over the 10 Tier-1 domains |
+| `terraform/env/dev.tfvars` | The only place `cost_profile` and limits are set; changed by PR | HCL |
+| `scripts/00_terraform_bootstrap.sql` | One-time manual step: Terraform identities (Decision 9) | SQL, run once as `ACCOUNTADMIN` |
+| `scripts/seed_config.sql` | `TABLE_METADATA` seed (renamed from `bootstrap_config.sql`, DDL moved to Terraform) | SQL, CI step |
+| `scripts/budget.sql` | Custom budget on `CDC_POC`, limit, refresh tier, custom action + cycle-start action | SQL, CI step (exception) |
+| `scripts/verify_governance.sql` | Read-only account checks for AT-002/003/004 | SQL |
+| `dagster/pipeline/gate.py` | Pure decision function for the sensor | Python |
+| `dagster/pipeline/sensors.py`, `jobs.py` | Sensor uses `gate.decide`; job records the consumed `run_key` | Python, Dagster |
+| `tests/load/generate_load.py` | Seeded, fixed-schedule load generator; writes a commit log | Python, psycopg2 |
+| `docs/measurement/` | Protocol, queries, attribution method, results template | Markdown + SQL |
+| `docs/runbooks/` | Connector down; monitor suspended; budget alert; gate task failure; after the trial | Markdown |
+| `.github/workflows/terraform.yml` | Plan on PR, plan + approved apply on `main` | GitHub Actions |
 
 ---
 
@@ -102,78 +112,73 @@ switch on the same objects, not two deployments (Decision 2):
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** Streams must be created on existing tables (F5), and Bronze tables are created by the
-connector on first write. A single root cannot create the database and the streams on its tables in
-one apply.
+**Context:** Streams need existing tables (F5); Bronze tables appear on the connector's first write.
 
-**Choice:** `terraform/platform` (everything that does not depend on data) and `terraform/pipeline`
-(procedure, streams, tasks). Order: platform → `bootstrap_config.sql` → stack + connectors → first
-rows land → pipeline. `pipeline` reads the Bronze tables with a data source and fails `plan` with a
-clear message if they are missing.
+**Choice:** `terraform/platform` (nothing that depends on data) and `terraform/pipeline` (procedures,
+streams, tasks). Order: platform → `seed_config.sql` → `budget.sql` → stack + connectors → first rows
+land → pipeline. Until the Bronze tables exist, the CI step for `pipeline` **skips its plan with a
+notice** instead of failing, so PRs are not red for a reason unrelated to the change.
 
-**Rationale:** Keeps Terraform as the owner of every cost-relevant object (REQ-01) while respecting
-the connector's ownership of the Bronze schema.
+**Rationale:** Terraform owns every cost-relevant object (REQ-01) while the connector keeps owning the
+Bronze schema.
 
 **Alternatives rejected:**
-1. Terraform creates the Bronze tables — rejected: schematization evolves their columns, so Terraform
-   would report drift on every new source column, and fixing it means fighting the connector.
-2. Keep streams/tasks as hand-run SQL (v2) — rejected: they hold the A/B switch; they must be code.
-3. One root with `depends_on` a null resource that waits for data — rejected: hides an operational
-   step inside `apply`, and a first deploy would hang.
+1. Terraform creates Bronze tables — schematization evolves their columns; permanent drift.
+2. Streams/tasks as hand-run SQL (v2) — they hold the A/B switch; they must be code.
+3. One root waiting on data inside `apply` — hides an operational step; a first deploy would hang.
 
-**Consequences:** a first deploy is two applies with a manual-looking gap; the runbook and the
-`make deploy-*` targets make the order explicit. Re-applies after that are ordinary.
+**Consequences:** a first deploy is two applies with a documented gap (`make deploy-platform`, then
+`make deploy-pipeline` — both only open/merge PRs; applies run in CI).
 
 ---
 
-### Decision 2: One codebase, two cost profiles
+### Decision 2: One codebase, two cost profiles, switched by PR at 00:00 UTC
 
 | Attribute | Value |
 |-----------|-------|
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** The A/B must compare v2 behaviour against v3 under identical load, on an account where
-v2 was never deployed.
+**Context:** A/B on identical load, on an account where v2 never ran; Constitution R1 forbids local
+`apply`; the DEFINE aggregates credits per UTC day.
 
-**Choice:** a `cost_profile` variable (`baseline` | `optimized`) in both roots, mapped to the table
-above, plus `BATCH_WINDOW_MINUTES` for Dagster. Switching profile = `terraform apply` of both roots
-+ Dagster restart, at a recorded UTC timestamp.
+**Choice:**
+- `cost_profile` (`baseline` | `optimized`) lives **only** in `terraform/env/dev.tfvars`, so every CI
+  apply uses the committed value and nothing silently reverts to a default.
+- A switch is a one-line PR prepared in advance and merged + apply-approved at **00:00 UTC
+  (21:00 in Vitória)**, together with `BATCH_WINDOW_MINUTES` in the local Dagster `.env` and a
+  Dagster restart. Actual switch time is logged in `docs/measurement/runs/switch.log`.
+- `make profile-a` / `make profile-b` only **prepare the PR**; they never apply.
 
-**Rationale:** the only differences between A and B are the ones under test. No second copy of the
-pipeline, no second database, nothing that could leak cost from one window into the other.
+**Rationale:** the only differences between A and B are the ones under test; UTC days stay whole;
+the switch happens at a humane local hour and through the same guarded path as any change.
 
 **Alternatives rejected:**
-1. Two parallel stacks (`CDC_POC_A`, `CDC_POC_B`) — rejected: doubles load and ingestion, and the two
-   would share account-level metering, making attribution harder.
-2. Measure B only and compare with v2's historical figures — rejected: different account, different
-   load, not a controlled comparison.
+1. Two parallel stacks — doubles ingestion, shared account metering blurs attribution.
+2. Compare with v2's historical figures — different account and load.
+3. Switch at 03:00 UTC (draft 0.3) — mixed A and B inside UTC days; midnight in Vitória.
 
-**Consequences:** the profile switch is part of the measurement protocol and must be timestamped.
-`baseline` stays in the code after v3 ships, as executable documentation of what was measured.
+**Consequences:** minutes between 00:00 UTC and the approved apply run in the previous profile; they
+are reported, not hidden. `baseline` stays in the code after v3 ships as executable documentation.
 
 ---
 
-### Decision 3: Keep the v2 object names as variable defaults; drop the `_V3` suffix
+### Decision 3: Keep the v2 object names; drop the `_V3` suffix; no dbt changes
 
 | Attribute | Value |
 |-----------|-------|
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** The `_V3` suffix existed so v3 could coexist with v2 on one account. v2 is not on this
-account (DEFINE 1.1), and Decision 2 removes the need for parallel copies.
+**Context:** The suffix existed for coexistence with v2, which is not on this account; Decision 2
+removes parallel copies. The DEFINE forbids dbt changes in this feature.
 
-**Choice:** names are Terraform variables with v2's values as defaults (`CDC_POC`, `CDC_WH`,
-`CDC_ROLE`, `CDC_ROLE_RO`). The hard-coded `database: CDC_POC` in `dbt/models/config/sources.yml`
-becomes `{{ env_var('SNOWFLAKE_DATABASE', 'CDC_POC') }}`.
+**Choice:** Terraform variables with v2's names as defaults (`CDC_POC`, `CDC_WH`, `CDC_ROLE`,
+`CDC_ROLE_RO`). `dbt/models/config/sources.yml` keeps its hard-coded `CDC_POC` (owner decision
+2026-11-17); making the database name configurable in dbt goes to the roadmap.
 
-**Rationale:** zero churn in dbt, Dagster and connector configuration (all already read env vars),
-and a client deployment changes names in one `tfvars` file.
-
-**Consequences:** AT-002 in the DEFINE refers to `CDC_WH_V3`; it reads as `var.warehouse_name`
-(default `CDC_WH`). Recorded as DEFINE revision 1.3 (naming only, no scope change). `CLAUDE.md`
-updated in the same PR.
+**Consequences:** AT-002 reads `var.warehouse_name` (default `CDC_WH`) — DEFINE revision 1.3.
+`CLAUDE.md` updated in the Build PR.
 
 ---
 
@@ -184,54 +189,56 @@ updated in the same PR.
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** REQ-02, F1, F6.
-
-**Choice:** `snowflake_warehouse.generation = local.profile.generation`, `enable_query_acceleration
-= false`, `warehouse_size = "XSMALL"`, `auto_suspend = 60`, `auto_resume = true`,
-`initially_suspended = true`, `resource_monitor = snowflake_resource_monitor.cdc_wh.name`. Provider
-constraint `>= 2.7.0, < 3.0.0`, exact version locked in `.terraform.lock.hcl`.
-
-**Rationale:** the account rejects the older `RESOURCE_CONSTRAINT` path for Gen1, and the provider
-exposes `generation` since 2.7.
+**Choice:** `generation = local.profile.generation`, `enable_query_acceleration = false`,
+`warehouse_size = "XSMALL"`, `auto_suspend = 60`, `auto_resume = true`, `initially_suspended = true`,
+`resource_monitor = <cdc_wh monitor>`. Provider `>= 2.7.0, < 3.0.0`, exact version in
+`.terraform.lock.hcl`.
 
 **Consequences:** the provider reads generation back through `resource_constraint` for standard
-warehouses (provider docs note); the Build must confirm `plan` is clean after `apply` (AT-001). If it
-is not, the drift is documented and `lifecycle.ignore_changes` is **not** used to hide it.
+warehouses; the Build confirms a clean second `plan` (AT-001). Drift, if any, is documented — never
+hidden with `ignore_changes`.
 
 ---
 
-### Decision 5: Serverless gate tasks — with the brake moved, not removed
+### Decision 5: Serverless gate tasks — the brake moved, with its limits written down
 
 | Attribute | Value |
 |-----------|-------|
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** REQ-04 moves the ten gate tasks off `CDC_WH`. F2: their spend is then invisible to every
-resource monitor. A misbehaving serverless task could spend credits with nothing able to suspend it.
+**Context:** REQ-04 moves the gate tasks off `CDC_WH`; F2 means no monitor sees their spend. Per-task
+caps bound the **rate** of spend, not the **total** (review finding 8).
 
-**Choice:** in profile B, each task is serverless with:
-- `user_task_managed_initial_warehouse_size = "XSMALL"` and `SERVERLESS_TASK_MAX_STATEMENT_SIZE = 'XSMALL'` — the compute size can never grow;
-- `user_task_timeout_ms = 60000` — a run that hangs is killed after a minute;
-- `suspend_task_after_num_failures = 3`;
-- `schedule = "1 MINUTE"` + `when = SYSTEM$STREAM_HAS_DATA(…)` — same semantics as v2.
+**Choice (profile B):** each gate task is serverless with
+`user_task_managed_initial_warehouse_size = "XSMALL"`, `SERVERLESS_TASK_MAX_STATEMENT_SIZE = 'XSMALL'`,
+`user_task_timeout_ms = 10000` (a healthy run is two sub-second `INSERT`s),
+`suspend_task_after_num_failures = 3`, `schedule = 1 minute`, `when = SYSTEM$STREAM_HAS_DATA(…)`.
+On top, a **custom budget** scoped to `CDC_POC` (F7) with:
+- a monthly limit and Snowflake's notifications;
+- a custom action on **actual** spend at 100% calling `CONFIG.SP_SUSPEND_GATE_TASKS()`, which
+  suspends the ten gate tasks;
+- a cycle-start action that does **not** resume them automatically — resuming is a human step in the
+  `budget-alert` runbook, after the cause is understood;
+- the faster refresh tier if available on the trial (F8; cost of the tier to be checked at Build).
 
-Plus an **account budget** with a monthly spending limit and notification (budgets notify; they do
-not suspend). Resource monitors stay for the warehouses: one on `CDC_WH`, one at account level.
+**The numbers, stated plainly:**
+- Healthy case: ~10 runs/burst × < 1 s — negligible next to warehouse uptime.
+- Pathological worst case (every task times out every minute): 10 × 10 s per minute = 100 s/min of
+  XSMALL ≈ 1.67 compute-hours/hour × 0.9 ≈ **1.5 credits/hour**.
+- Detection delay of the budget action (F8): up to ~8 h on the standard tier → worst-case exposure
+  ≈ **12 credits** before the action fires (≈ 1.5 credits on the 1-hour tier).
 
-**Rationale:** the per-task caps bound the worst case mechanically (10 tasks × XSMALL × 60 s per
-minute); the budget makes the residual visible. Together they replace what the warehouse monitor
-used to do for these tasks.
+**Rationale:** the timeout bounds the rate mechanically; the budget action bounds the total
+automatically, with a known delay; the runbook covers the human part. Compared with v2, the README
+claim becomes accurate: "monitors cap warehouses; gate tasks are capped by size and timeout; a budget
+suspends them if their total spend passes a limit — with a refresh delay of up to N hours."
 
 **Alternatives rejected:**
-1. Keep tasks on the warehouse — rejected: that is the cost being measured (one full minute billed
-   per firing for two sub-second `INSERT`s).
-2. True triggered tasks (no `SCHEDULE`) — deferred, out of scope by DEFINE; serverless triggered
-   tasks additionally require a target completion interval. Candidate for a later ADR.
-
-**Consequences:** the "credit brake" story in the README changes from "a monitor caps everything" to
-"monitors cap warehouses; tasks are capped by size, timeout and failure count; a budget alerts on
-the rest." That is more honest than v2's, which never covered Snowpipe Streaming either.
+1. Keep tasks on the warehouse — the cost under measurement.
+2. Timeout of 60 s (draft 0.3) — worst case ~9 credits/hour.
+3. True triggered tasks — out of scope by DEFINE; serverless triggered tasks also require a target
+   completion interval. Candidate ADR.
 
 ---
 
@@ -242,129 +249,188 @@ the rest." That is more honest than v2's, which never covered Snowpipe Streaming
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** REQ-05 asks for a minimum interval *N* between runs without losing pending rows. Two
-traps in the obvious implementation ("skip if the last run was < *N* ago"):
-1. **Stranding.** The v2 sensor only touches Snowflake for `HOT_CYCLES_AFTER_ACTIVITY = 3` cycles
-   after the last Kafka activity. With *N* = 10 min those cycles expire inside the window, and rows
-   written to `PENDING_RUNS` meanwhile wait for the next burst — possibly forever in a quiet period.
-   Same class of bug as the global watermark (ADR-0024).
-2. **Two runs per burst.** Running on the first sign of a burst and again after the window (to catch
-   domains whose gate task fired later) pays two resumes per burst — the cost the window exists to cut.
+**Context:** REQ-05 asks for a minimum interval *N* between runs without losing pending rows. Two traps
+in the obvious implementation:
+1. **Stranding.** v2 only touches Snowflake for 3 cycles after the last Kafka activity; with *N* = 10
+   those cycles expire inside the window and rows wait for the next burst — possibly forever.
+2. **Two runs per burst.** Running on the first sign of a burst and again after the window pays two
+   resumes per burst.
 
-**Choice:** move the decision into a pure function in `dagster/pipeline/gate.py`, with state
-`{quiet, last_run_at, pending, initialized}` where `quiet` counts cycles since the last Kafka activity.
-- **Profile A (`N = 0`, legacy):** reproduce v2 exactly — query on the activity cycle and the next 3.
-- **Profile B (`N > 0`, batched):** query Snowflake only when `pending` is set, `now − last_run_at ≥ N`,
-  and **either** the burst has **settled** (`quiet ≥ QUIET_CYCLES`, default 3 — longer than the ≤ 1 min
-  gate-task lag) **or** it has been pending for ≥ *N* (**starvation guard**: under continuous traffic a
-  burst never settles, so it is processed every *N* minutes instead of never). One query, one run,
-  then `pending = False` — unless the run happened mid-burst, in which case `pending` stays set. If the settled query finds no
-  rows (a gate task lagging unusually), `pending` stays set for one more check after another
-  `QUIET_CYCLES`, then clears.
+**Choice:** a pure function in `dagster/pipeline/gate.py`, state
+`{quiet, last_run_at, pending, pending_since, retries, initialized}`, `quiet` = cycles since the last
+Kafka activity.
+- **Profile A (`N = 0`):** reproduce v2 exactly — query on the activity cycle and the next 3.
+- **Profile B (`N > 0`):** query only when `pending` is set, `now − last_run_at ≥ N`, and **either**
+  the burst has **settled** (`quiet ≥ QUIET_CYCLES`, default 3) **or** it has been pending for ≥ *N*
+  (**starvation guard** for continuous traffic). If a settled query finds no rows, one more settled
+  check, then `pending` clears. A run made mid-burst (starvation guard) keeps `pending` set.
 
-**Rationale:** one resume per burst in the common case; no Snowflake query while a burst is still
-arriving or inside the window; `pending` guarantees a check for every burst seen. A pure function is
-exhaustively testable with pytest (AT-005, AT-006) without Dagster, Kafka or Snowflake.
+**Why `QUIET_CYCLES = 3` is enough:** "Kafka activity" is the broker receiving the message, not the
+Bronze commit. Between the two sit the connector's flush, Snowpipe Streaming's commit (seconds), the
+Prometheus scrape interval (15 s in v2) and the gate task's next tick (≤ 60 s). Three minutes covers
+that chain with margin; the dry run measures it, and the value is a constant, not a guess baked in.
 
-**Found in review (2026-11-17, by simulating the sketch):** the first version of this logic ran twice
-per burst, and the second starved under continuous traffic (bursts every 3 min were processed only
-when traffic stopped). Both scenarios are now unit-test cases.
+**Found in review (2026-11-17):** simulating draft 0.2 showed two runs per burst; draft 0.3 showed
+starvation under continuous traffic. Draft 0.4 passes: legacy parity with v2 on 500 random sequences;
+no stranded row and a worst wait of 10 min on 2,000 random sequences. All are pytest cases, plus the
+"empty starvation-guard query followed by an immediate retry" case (at most two consecutive queries).
 
-**Consequences:** profile B adds up to `QUIET_CYCLES` minutes of latency per burst on top of *N* —
-inside the DEFINE's freshness guardrail (p95 ≤ *N* + 5 min). Cursor format changes; an old-format
-cursor falls into `initialized = False` and self-heals as in v2. A residual risk remains: a gate task
-that fires more than 2 × `QUIET_CYCLES` minutes after the burst leaves its row for the next burst
-(delayed, never lost). AT-006 measures whether this happens.
+**Consequences:** profile B adds up to `QUIET_CYCLES` minutes of latency per burst, inside the
+freshness guardrail (p95 ≤ *N* + 5). A gate task that fires more than 2 × `QUIET_CYCLES` minutes after
+its burst leaves its row for the next one — delayed, never lost; AT-006 measures it.
 
 ---
 
-### Decision 7: Freshness measured from the generator's commit log and `PROCESSING_LOG`
+### Decision 7: Freshness = the run that actually consumed the burst
 
 | Attribute | Value |
 |-----------|-------|
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** the freshness guardrail needs "source commit → Gold" per burst. Gold rows carry no
-source timestamp.
+**Context:** "first Gold `finished_at` after `committed_at`" (draft 0.3) can pick a run that started
+before the burst reached Bronze — common in profile A, which runs almost every minute (review
+finding 5).
 
-**Choice:** the generator logs `(burst_id, committed_at_utc)` after each burst commit. Freshness of a
-burst = first `PROCESSING_LOG.finished_at` of a Gold model **after** `committed_at` − `committed_at`.
-p95 over all bursts in the window.
+**Choice:** `PENDING_RUNS` gains `consumed_run_key`, written by the sensor in the same `UPDATE` that
+marks rows consumed; the job writes the same key to `PROCESSING_LOG`. Freshness of a burst =
+`finished_at` of the last Gold model in the run whose `run_key` consumed the **first** `PENDING_RUNS`
+row detected after the burst's `committed_at` − `committed_at`. p95 per window.
 
-**Rationale:** uses data that already exists (v2's `PROCESSING_LOG`) and a clock the protocol
-controls. No new instrumentation in the pipeline.
-
-**Consequences:** bounded above by the burst cadence — a burst that is never processed shows as a
-gap, not as a large delay; the protocol checks for gaps explicitly.
+**Consequences:** freshness is tied to causality, not to timestamps that happen to be later. A burst
+with no consuming run within 2 h is reported as a gap.
 
 ---
 
-### Decision 8: Spending limits sized to the trial
+### Decision 8: Spending limits sized to the whole trial
 
 | Attribute | Value |
 |-----------|-------|
-| **Status** | Accepted — values provisional until the credit price is read from *Admin → Billing* |
+| **Status** | Accepted — owner decision on the pipeline cap (2026-11-17) |
 | **Date** | 2026-11-17 |
 
-**Context:** trial balance USD 400, ends 2026-12-17. Credit price for this edition/region not yet
-read; at USD 3–4/credit the balance is roughly 100–130 credits.
+**Context:** balance USD 400 (confirmed), trial ends 2026-12-17 and spans two calendar months; budgets
+are monthly (calendar), monitors can be `NEVER` (F9). Credit price for this edition/region still to be
+read from *Admin → Billing*; at USD 3–4/credit the balance is ~100–130 credits.
 
-**Choice (variables, defaults):**
+**Choice (in `dev.tfvars`):**
 
 | Control | Scope | Quota | Frequency | Triggers |
 |---------|-------|-------|-----------|----------|
-| `cdc_wh_monitor` | `CDC_WH` | 25 credits | `MONTHLY` | notify 50/75 · suspend 90 · suspend immediately 100 |
-| `account_monitor` | account (all warehouses, incl. `COMPUTE_WH`) | 50 credits | `MONTHLY` | notify 50/75/90 · suspend 100 |
-| account budget | all spend incl. serverless | 60 credits / month | monthly | notify (budgets cannot suspend) |
+| `cdc_wh_monitor` | `CDC_WH` | **25 credits** (owner decision) | `NEVER` | notify 50/75 · suspend 90 · suspend immediately 100 |
+| `account_monitor` | account (all warehouses, incl. `COMPUTE_WH`) | 40 credits | `NEVER` | notify 50/75/90 · suspend 100 |
+| `cdc_budget` (custom) | `CDC_POC` (serverless tasks, Snowpipe Streaming) | 10 credits / calendar month | monthly | notify + custom action at 100% |
 
-**Rationale:** the measurement is estimated at ~12–15 credits (see Measurement plan); 25 on the
-pipeline warehouse leaves room for the dry run and reruns, and the account caps keep at least half
-the trial in reserve even if everything else goes wrong.
+**Rationale:** the measurement is estimated at ~16 credits (Measurement plan); 25 on `CDC_WH` leaves
+room for the dry run and one rerun. With `NEVER`, the warehouse caps hold for the whole trial instead
+of resetting mid-way; the budget's calendar month allows at most 2 × 10 credits across the trial.
+Worst case across everything: 40 + 20 = 60 credits — about half the balance at the assumed price.
 
-**Consequences:** if the credit price makes 50 credits exceed ~50% of the balance, the defaults are
-lowered before the first apply. Decision recorded so the numbers are reviewable, not magic.
+**Consequences:** **the credit price must be read before the first apply**; if 60 credits exceed
+~50% of the balance, the defaults are lowered in the same PR. Monitor `NOTIFY_USERS` = the owner.
 
 ---
 
-### Decision 9: The one manual step — bootstrapping Terraform's own identity
+### Decision 9: Terraform identities, and the honest list of REQ-01 exceptions
 
 | Attribute | Value |
 |-----------|-------|
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** Terraform needs a Snowflake identity before it can create anything.
+**Choice:** `scripts/00_terraform_bootstrap.sql`, run once by a human as `ACCOUNTADMIN`, creates:
+- `TERRAFORM_SVC` — key-pair auth; granted `SYSADMIN`, `SECURITYADMIN` **and `ACCOUNTADMIN`**
+  (creating resource monitors and budgets requires it). Provider aliases (`sysadmin`,
+  `securityadmin`, `accountadmin`) make each resource use the least-privileged role that can own it.
+  Key only in the `snowflake-dev` GitHub environment and the owner's machine.
+- `TERRAFORM_PLAN_SVC` — read-only role for `plan` refreshes (USAGE/MONITOR on the objects Terraform
+  manages, no ownership). Key in the `snowflake-plan` environment, which has **no** reviewer, so PRs
+  get a plan automatically (Decision 11). Agents use this identity, never `TERRAFORM_SVC`.
 
-**Choice:** `scripts/00_terraform_bootstrap.sql`, run once by a human as `ACCOUNTADMIN`: creates
-`TERRAFORM_SVC` (TYPE = SERVICE, key-pair auth) and grants it `SYSADMIN`, `SECURITYADMIN` and the
-account privileges needed for monitors and budgets. The provider uses aliases per role
-(`sysadmin`, `securityadmin`, `accountadmin`) so each resource is created by the least-privileged
-role that can own it.
+**Exceptions to REQ-01 ("nothing created by hand"), all versioned and listed in the README:**
 
-**Rationale:** every IaC setup has this step; documenting it is better than pretending it away.
+| # | Step | Run by | Why not Terraform |
+|---|------|--------|-------------------|
+| 1 | `00_terraform_bootstrap.sql` | human, once | Terraform's own identity |
+| 2 | `budget.sql` | CI | no provider resource for custom budgets / custom actions (to re-check at Build) |
+| 3 | `ALTER ACCOUNT SET RESOURCE_MONITOR` | CI, only if the provider cannot assign an account-level monitor | to be checked at Build |
 
-**Consequences:** REQ-01 ("nothing created by hand") has one documented exception, listed in the
-README. The private key lives only in the GitHub environment secret and the owner's machine.
+`seed_config.sql` is not an exception: it inserts data, not objects. CONFIG tables move into
+`terraform/platform` as `snowflake_table` resources — their schema is ours and static, unlike Bronze.
 
 ---
 
-### Decision 10: Correct ADR-0019 instead of carrying its wording forward
+### Decision 10: Correct ADR-0019's wording instead of carrying it forward
 
 | Attribute | Value |
 |-----------|-------|
 | **Status** | Accepted |
 | **Date** | 2026-11-17 |
 
-**Context:** ADR-0019 calls the gate "Streams and **Triggered** Tasks" and states a false `WHEN` costs
-nothing. The tasks are scheduled tasks with a `WHEN` clause, and F3 says a nominal charge accrues
-per false evaluation.
+**Choice:** at Ship, a new ADR supersedes ADR-0019's **wording** (not its decision): the gate is
+"scheduled tasks gated by `SYSTEM$STREAM_HAS_DATA`", and "a false evaluation costs a nominal charge,
+measured in the idle window at X credits / 6 h".
 
-**Choice:** at Ship, a new ADR supersedes ADR-0019's wording (not its decision): "scheduled tasks
-gated by `SYSTEM$STREAM_HAS_DATA`; a false evaluation costs a nominal charge, measured here as …".
+---
 
-**Consequences:** the v3 idle-cost criterion (DEFINE: < 0.01 serverless credits over 6 h) becomes the
-measured value of that nominal charge.
+### Decision 11: CI that gives every PR a plan without exposing the apply identity
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | Accepted |
+| **Date** | 2026-11-17 |
+
+**Context:** a key in a reviewer-protected environment makes "PR shows a plan" non-automatic; no key
+means no plan (review finding 4). The repo is public.
+
+**Choice:** `terraform.yml` jobs:
+1. **PR from the same repo:** `fmt -check`, `validate`, `plan` for both roots in environment
+   `snowflake-plan` (`TERRAFORM_PLAN_SVC`), plan posted as a PR comment; `pipeline` plan skipped with
+   a notice while Bronze does not exist.
+2. **PR from a fork:** `fmt -check` + `validate` only (no secrets are exposed to forks).
+3. **Push to `main`:** plan, then apply in environment `snowflake-dev` (`TERRAFORM_SVC`, required
+   reviewer), then a second plan that must show no changes (AT-001), then `seed_config.sql` and
+   `budget.sql`.
+
+`ci.yml` keeps its lint/validate jobs and gains `pytest tests/unit`.
+
+---
+
+### Decision 12: Terraform state in S3 with native locking
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | Accepted |
+| **Date** | 2026-11-17 |
+
+**Choice:** one S3 bucket (versioning on, encryption on, public access blocked), keys
+`sdd-kafka-snowflake-3/platform.tfstate` and `…/pipeline.tfstate`, S3 native lockfile
+(`use_lockfile = true`, Terraform ≥ 1.11) — no DynamoDB table. GitHub authenticates to AWS with OIDC,
+not static keys.
+
+**Alternatives rejected:** S3 + DynamoDB (DEFINE default) — still works but is the older pattern and
+one more resource; local state — unreviewable and unsafe with CI applies.
+
+---
+
+### Decision 13: How the saving is attributed to each change (DEFINE open question 5)
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | Accepted |
+| **Date** | 2026-11-17 |
+
+**Choice:** the A/B measures the combined effect; the share of each change is **estimated** from the
+metering split and reported as an estimate:
+- **Gen1:** arithmetic — B's billed warehouse seconds × (1.35 − 1.0) per hour-equivalent: what B
+  would have cost on Gen2 minus what it cost on Gen1.
+- **Serverless gate tasks:** A's warehouse resumes caused by gate tasks (resumes with only task queries
+  in `QUERY_HISTORY` between resume and suspend) × billed seconds, minus B's
+  `SERVERLESS_TASK_HISTORY` credits.
+- **Batching:** the remainder: total(A) − total(B) − Gen1 share − tasks share.
+
+**Consequences:** the README states the three shares with "estimated" next to them; only the total is
+measured.
 
 ---
 
@@ -372,56 +438,79 @@ measured value of that nominal charge.
 
 | REQ | Where it is met | Verified by |
 |-----|-----------------|-------------|
-| REQ-01 | `terraform/platform`, `terraform/pipeline`; one documented manual step (Decision 9) | AT-001 |
-| REQ-02 | `warehouse.tf` (Decision 4) | AT-002 |
-| REQ-03 | `monitors.tf` + `scripts/budget.sql` (Decisions 5, 8) | AT-003 |
+| REQ-01 | `terraform/platform`, `terraform/pipeline`; exceptions listed (Decision 9) | AT-001 |
+| REQ-02 | `warehouse.tf` (Decision 4), profile B | AT-002 |
+| REQ-03 | `monitors.tf` + `budget.sql` (Decisions 5, 8) | AT-003 |
 | REQ-04 | `terraform/pipeline/gate.tf` (Decision 5) | AT-004 |
 | REQ-05 | `gate.py` + `sensors.py` (Decision 6) | AT-005, AT-006 |
 | REQ-06 | `tests/load/generate_load.py` | AT-007 |
-| REQ-07 | `docs/measurement/` (Measurement plan) | AT-008 |
-| REQ-08 | `.github/workflows/terraform.yml` | AT-009 |
+| REQ-07 | `docs/measurement/` (Measurement plan, Decisions 7, 13) | AT-008 |
+| REQ-08 | `.github/workflows/terraform.yml` (Decision 11) | AT-009 |
 | REQ-09 | `README.md`, Day 14 | AT-010 |
-| REQ-10 | `docs/runbooks/` (+ `budget-alert.md`, added by Decision 5) | AT-011 |
-| REQ-11 (COULD) | `jobs.py`: select `+bronze_<domain>+` from the run's `domains` tag. Built only if Day 6 has slack; otherwise roadmap. **Not** active during the A/B, so it cannot blur the comparison. | AT-012 |
+| REQ-10 | `docs/runbooks/` (5 runbooks) | AT-011 |
+| REQ-11 (COULD) | `jobs.py`: select `bronze_<domain>+` (downstream only) from the run's `domains` tag. Built only if Day 6 has slack; **disabled during the A/B** so it cannot blur the comparison. | AT-012 |
 
 ---
 
 ## Measurement plan (REQ-06, REQ-07)
 
-**Load profile (default, calibrated in the Day 7 dry run):** one burst every **60 min**, each burst
-= a fixed, seeded mix of inserts and updates across the 10 domains (~200 rows), committed in one
-transaction per domain. Seed fixed; the generator writes `docs/measurement/runs/<window>/commits.csv`.
+**Load profile (calibrated in the dry run):** one **cluster every 2 h**; each cluster = 5 bursts at
+minutes **0, 2, 4, 10 and 12**; each burst ≈ 200 rows, a fixed seeded mix of inserts and updates across
+the 10 domains. The schedule is chosen to exercise what the DEFINE describes (review finding 1):
+- Profile A: every burst triggers runs on the hot cycles — the "dbt run every minute during a burst"
+  behaviour.
+- Profile B: bursts 0–4 settle and run at ~:07; bursts 10–12 settle at ~:15 but the window holds them
+  until :17 — **the window is binding** once per cluster.
 
-**Windows (UTC):**
+The generator writes `docs/measurement/runs/<window>/commits.csv` (`burst_id, committed_at_utc, rows`).
 
-| Window | Start | End | Profile |
-|--------|-------|-----|---------|
-| Dry run | 2026-11-24 12:00 | 2026-11-24 18:00 | A for 3 h, then B for 3 h |
-| A | 2026-11-25 03:00 | 2026-11-27 03:00 | baseline |
-| B | 2026-11-27 03:00 | 2026-11-29 03:00 | optimized |
-| Read results | ≥ 2026-11-29 07:00 | — | (`ACCOUNT_USAGE` latency) |
+**Windows (UTC; Vitória = UTC − 3):**
 
-**Rough cost estimate (to size the budget, not a prediction to be confirmed):**
+| Window | Start (UTC) | End (UTC) | Profile | Load |
+|--------|-------------|-----------|---------|------|
+| Dry run | 2026-11-24 12:00 | 2026-11-24 18:00 | A 3 h, then B 3 h | on |
+| A | **2026-11-25 00:00** | **2026-11-27 00:00** | baseline | on |
+| B | 2026-11-27 00:00 | 2026-11-29 00:00 | optimized | on |
+| Idle | 2026-11-29 00:00 | 2026-11-29 06:00 | optimized | **off** (idle criterion, F3) |
+| Read results | ≥ 2026-11-29 10:00 | — | — | `ACCOUNT_USAGE` latency |
 
-| | Uptime per burst | Bursts/day | Rate | Credits/day | 48 h |
-|--|------------------|------------|------|-------------|------|
-| A | ~10 min (tasks resume + up to 2 dbt runs + idle tails) | 24 | 1.35 cr/h | ~5.4 | ~11 |
-| B | ~4 min (one dbt run + idle tail) + serverless seconds | 24 | 1.0 cr/h | ~1.6 + ε | ~3 |
+In Vitória time, the measurement ends on 2026-11-28 at 21:00 and the idle window on 2026-11-29 at
+03:00 — consistent with the `_index` plan (Days 8–11 = Nov 25–28 local).
 
-Total including the dry run: ~15 credits. The estimate is deliberately written down **before**
-measuring so the result can disagree with it.
+**Rough cost estimate (written before measuring, to size limits — not a target):**
 
-**Validity rules:** no manual use of `CDC_WH` during A or B (ad-hoc work goes to `COMPUTE_WH`,
-which is excluded from the analysis); the machine running the stack must stay awake — any gap of
-> 2 bursts in `commits.csv` voids that window and it is rerun; the profile switch timestamp is
-recorded in `docs/measurement/runs/switch.log`.
+| | Warehouse uptime per cluster | Clusters/day | Rate | Credits/day | 48 h |
+|--|------------------------------|--------------|------|-------------|------|
+| A | ~20 min (hot-cycle queries + up to 5 dbt runs + tails) | 12 | 1.35 cr/h | ~5.4 | ~11 |
+| B | ~8 min (2 runs + tails) + serverless seconds | 12 | 1.0 cr/h | ~1.6 | ~3.2 |
 
-**Queries (in `docs/measurement/queries.sql`):**
+Plus dry run ~1 credit and idle ~0 → **~16 credits** in total, against the 25-credit cap.
+
+**Validity rules:**
+- No manual use of `CDC_WH` during the windows; ad-hoc work goes to `COMPUTE_WH`, excluded from the
+  analysis.
+- The machine running the stack must stay awake. A gap of more than one cluster in `commits.csv`
+  voids that window, which is rerun. **Recommended:** run the stack on a small cloud VM for Days 7–12.
+- The switch time is recorded; minutes in the wrong profile after 00:00 UTC are reported.
+- "One resume per run" holds only if the Dagster job starts querying within 60 s of the sensor's
+  `SELECT`. The dry run measures the gap; if it is longer, B pays two resumes per run and the
+  result is reported as such.
+
+**Queries (`docs/measurement/queries.sql`):**
 - Warehouse credits/day — `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`, `WAREHOUSE_NAME = 'CDC_WH'`.
-- Serverless task credits/day — `SNOWFLAKE.ACCOUNT_USAGE.SERVERLESS_TASK_HISTORY`, filtered to the `CDC_POC` database.
-- Cross-check — `SNOWFLAKE.ACCOUNT_USAGE.METERING_HISTORY` grouped by `SERVICE_TYPE`.
-- Resumes/day — `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_EVENTS_HISTORY`, resume events for `CDC_WH` (exact `EVENT_NAME` value to be confirmed against the view on Day 7).
-- Freshness — `commits.csv` joined with `CDC_POC.CONFIG.PROCESSING_LOG` (Decision 7).
+- Serverless task credits/day — `SNOWFLAKE.ACCOUNT_USAGE.SERVERLESS_TASK_HISTORY`, database `CDC_POC`.
+- Cross-check — `METERING_DAILY_HISTORY` by `SERVICE_TYPE`. Cloud services are reported **separately**
+  and before/after the daily 10% adjustment, because the adjustment changes when warehouse use drops;
+  they are not part of the DEFINE's "total cost".
+- Resumes/day — `WAREHOUSE_EVENTS_HISTORY`, resume events for `CDC_WH` (exact `EVENT_NAME` confirmed in
+  the dry run).
+- Freshness — `commits.csv` × `PENDING_RUNS.consumed_run_key` × `PROCESSING_LOG` (Decision 7).
+- Attribution — Decision 13.
+
+**After the trial (DEFINE constraint):** on 2026-12-17 the account stops unless a payment method is
+added. The README states it, the measured results stay in `docs/measurement/runs/` (CSV + query
+output, committed), and `docs/runbooks/after-trial.md` explains how to redeploy on a new account
+(`dev.tfvars` + the bootstrap step).
 
 ---
 
@@ -429,29 +518,28 @@ recorded in `docs/measurement/runs/switch.log`.
 
 | # | File | Action | Purpose | Dependencies |
 |---|------|--------|---------|--------------|
-| 1 | `scripts/00_terraform_bootstrap.sql` | Create | Terraform service user + roles (Decision 9) | — |
-| 2 | `terraform/platform/versions.tf`, `providers.tf`, `backend.tf` | Create | Provider pin, role aliases, S3 state | 1 |
-| 3 | `terraform/platform/variables.tf`, `profiles.tf` | Create | Names, `cost_profile`, limits | 2 |
-| 4 | `terraform/platform/database.tf`, `warehouse.tf`, `monitors.tf`, `roles.tf`, `users.tf`, `grants.tf` | Create | REQ-01/02/03 | 3 |
-| 5 | `scripts/bootstrap_config.sql` | Modify | Drop hard-coded names; add `PENDING_RUNS`, `STREAM_CONSUMPTION_LOG` | 4 |
-| 6 | `scripts/budget.sql` | Create | Account budget (fallback if provider lacks a resource) | 4 |
-| 7 | `terraform/pipeline/*.tf` | Create | Procedure, 10 streams, 10 tasks; `cost_profile` switch | 4, Bronze tables |
-| 8 | `scripts/streams_and_tasks.sql` | Delete | Replaced by 7 (kept in git history) | 7 |
-| 9 | `scripts/snowflake_setup.sql`, `scripts/00_account_bootstrap.sql` | Delete | Replaced by 1–4 | 4 |
+| 1 | `scripts/00_terraform_bootstrap.sql` | Create | Terraform identities (Decision 9) | — |
+| 2 | `terraform/platform/{versions,providers,backend}.tf` | Create | Provider pin, role aliases, S3 state | 1 |
+| 3 | `terraform/platform/{variables,profiles}.tf`, `terraform/env/dev.tfvars` | Create | Names, `cost_profile`, limits | 2 |
+| 4 | `terraform/platform/{database,config_tables,warehouse,monitors,roles,users,grants}.tf` | Create | REQ-01/02/03 | 3 |
+| 5 | `scripts/seed_config.sql` (from `bootstrap_config.sql`) | Rename + modify | Seed only; DDL moved to 4 | 4 |
+| 6 | `scripts/budget.sql` | Create | Custom budget + actions (exception 2) | 4, 7 |
+| 7 | `terraform/pipeline/{versions,providers,backend,variables,procedures,gate}.tf` | Create | Gate + suspend procedures, streams, tasks | 4, Bronze tables |
+| 8 | `scripts/streams_and_tasks.sql`, `scripts/snowflake_setup.sql`, `scripts/00_account_bootstrap.sql` | Delete | Replaced by 1–7 (git history keeps them) | 7 |
+| 9 | `scripts/verify_governance.sql` | Modify | Checks for AT-002/003/004 on the new names | 4, 7 |
 | 10 | `dagster/pipeline/gate.py` | Create | Pure decision function (Decision 6) | — |
-| 11 | `dagster/pipeline/sensors.py` | Modify | Use `gate.decide`; read `BATCH_WINDOW_MINUTES` | 10 |
-| 12 | `tests/unit/test_gate.py` | Create | Exhaustive tests of 10 (AT-005, AT-006) | 10 |
-| 13 | `tests/load/generate_load.py` | Create | Seeded load + commit log (REQ-06) | — |
-| 14 | `docs/measurement/PROTOCOL.md`, `queries.sql`, `RESULTS_TEMPLATE.md` | Create | REQ-07 | 13 |
-| 15 | `.github/workflows/terraform.yml` | Create | REQ-08 | 2–7 |
-| 16 | `.github/workflows/deploy.yml` | Delete | Disabled since v2; replaced by 15 | 15 |
-| 17 | `dbt/models/config/sources.yml` | Modify | Database name from env var (Decision 3) | — |
-| 18 | `docs/runbooks/connector-down.md`, `monitor-suspended.md`, `budget-alert.md` | Create | REQ-10 | 4–7 |
-| 19 | `Makefile` | Modify | `deploy-platform`, `deploy-pipeline`, `profile-a`, `profile-b`, `load` | 2–13 |
-| 20 | `CLAUDE.md`, `.env.example` | Modify | Names, account, `BATCH_WINDOW_MINUTES`, `TERRAFORM_*` vars | — |
-| 21 | `README.md` | Modify | *What it actually costs* with measured numbers (REQ-09) — Day 14 | 14 |
-
-**Total files:** ~35 (Terraform files counted individually).
+| 11 | `dagster/pipeline/sensors.py` | Modify | Use `gate.decide`; write `consumed_run_key` | 10 |
+| 12 | `dagster/pipeline/jobs.py` | Modify | Pass `run_key` to `PROCESSING_LOG`; REQ-11 selection (COULD) | 11 |
+| 13 | `tests/unit/test_gate.py` | Create | Parity, settle, window, starvation, retry, migration | 10 |
+| 14 | `tests/load/generate_load.py`, `tests/unit/test_generate_load.py` | Create | REQ-06 / AT-007 | — |
+| 15 | `docs/measurement/{PROTOCOL.md,queries.sql,ATTRIBUTION.md,RESULTS_TEMPLATE.md}` | Create | REQ-07 | 14 |
+| 16 | `.github/workflows/terraform.yml` | Create | REQ-08 (Decision 11) | 2–7 |
+| 17 | `.github/workflows/ci.yml` | Modify | Add `pytest tests/unit` | 13 |
+| 18 | `.github/workflows/deploy.yml` | Delete | Disabled since v2; replaced by 16 | 16 |
+| 19 | `docs/runbooks/{connector-down,monitor-suspended,budget-alert,gate-task-failure,after-trial}.md` | Create | REQ-10 | 4–7 |
+| 20 | `Makefile` | Modify | `deploy-*` and `profile-*` prepare PRs; `load`, `dry-run` | 3, 14 |
+| 21 | `CLAUDE.md`, `.env.example` | Modify | Names, `BATCH_WINDOW_MINUTES`, plan identity | — |
+| 22 | `README.md` | Modify | *What it actually costs*; exceptions; after-trial note (REQ-09) — Day 14 | 15 |
 
 ---
 
@@ -460,17 +548,15 @@ recorded in `docs/measurement/runs/switch.log`.
 | Path | Access | Notes |
 |------|--------|-------|
 | `terraform/`, `scripts/*.sql` | Owns | |
-| `dagster/pipeline/sensors.py`, `gate.py`, `jobs.py` | Owns | |
-| `tests/load/`, `tests/unit/test_gate.py` | Owns | |
-| `docs/measurement/`, `docs/runbooks/connector-down.md`, `monitor-suspended.md`, `budget-alert.md` | Owns | |
+| `dagster/pipeline/{sensors,gate,jobs}.py` | Owns | |
+| `tests/load/`, `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py` | Owns | |
+| `docs/measurement/`, the five runbooks above | Owns | |
 | `.github/workflows/terraform.yml`, `deploy.yml` | Owns (new / delete) | |
-| `.github/workflows/ci.yml` | Shared — serialize | Only to add `terraform` + `pytest` jobs; FT-03 also edits it |
-| `dbt/models/config/sources.yml`, `dbt/dbt_project.yml` | Shared — serialize | One-line change (Decision 3) |
+| `.github/workflows/ci.yml` | Shared — serialize | Adds `pytest`; FT-03 also edits it |
 | `Makefile`, `README.md`, `CLAUDE.md`, `.env.example`, `docs/adr/` | Shared — serialize | |
-| `dbt/models/**` (other) | Reads | REQ-11 selection only; COULD |
+| `dbt/**` | Reads | No dbt change in this feature (Decision 3) |
 
-No intersection with SCD2_RESTAURANTS' owned paths (`dbt/macros/resolve_cdc.sql`, restaurant models,
-fixtures). The two features can be built in parallel.
+No intersection with SCD2_RESTAURANTS' owned paths. The two features can be built in parallel.
 
 ---
 
@@ -478,22 +564,21 @@ fixtures). The two features can be built in parallel.
 
 | Role | Files | Why |
 |------|-------|-----|
-| Builder (Claude Code, Terraform + Snowflake context) | 1–9, 15–16, 19 | IaC and account objects; must load F1–F6 and the provider docs for each resource before writing it |
-| Builder (Cursor, Python) | 10–13, 17 | Small, interactive edits; `gate.py` is the riskiest logic and benefits from tight human review |
-| Author (Christian) | 14, 18, 21 | Protocol, runbooks and README are the portfolio's voice |
+| Builder (Claude Code, Terraform + Snowflake context, `TERRAFORM_PLAN_SVC` only) | 1–9, 16, 18, 20 | IaC; loads F1–F10 and each resource's provider docs before writing it |
+| Builder (Cursor, Python) | 10–14, 17 | `gate.py` is the riskiest logic and benefits from tight human review |
+| Author (Christian) | 15, 19, 21, 22 | Protocol, runbooks and README carry the portfolio's voice |
 | Validator (fresh session) | VALIDATION | Loads DEFINE + `docs/measurement/` only |
 
 ---
 
 ## Code Patterns
 
-### Pattern 1: Profiles as a lookup, not as conditionals scattered through resources
+### Pattern 1: Profiles as a lookup
 
 ```hcl
 # terraform/platform/profiles.tf
 variable "cost_profile" {
-  type    = string
-  default = "optimized"
+  type = string          # no default on purpose: the value lives only in terraform/env/dev.tfvars
   validation {
     condition     = contains(["baseline", "optimized"], var.cost_profile)
     error_message = "cost_profile must be baseline or optimized."
@@ -512,7 +597,7 @@ locals {
 ### Pattern 2: Warehouse with every cost setting explicit
 
 ```hcl
-# terraform/platform/warehouse.tf — attribute names to be checked against provider docs at Build
+# terraform/platform/warehouse.tf — attribute names checked against provider docs at Build
 resource "snowflake_warehouse" "cdc" {
   provider                  = snowflake.sysadmin
   name                      = var.warehouse_name
@@ -530,10 +615,10 @@ resource "snowflake_warehouse" "cdc" {
 ### Pattern 3: One stream + one task per domain, compute chosen by profile
 
 ```hcl
-# terraform/pipeline/gate.tf — sketch; the provider's task resource has strict field combinations
+# terraform/pipeline/gate.tf — sketch; the task resource has strict field combinations
 locals {
-  domains = toset(["ORDERS", "ORDER_ITEMS", "DRIVERS", "DRIVER_SHIFTS", "RESTAURANTS",
-                   "USERS_MONGO", "USERS_MSSQL", "PAYMENT_EVENTS", "RECOMMENDATIONS", "SEARCH_EVENTS"])
+  domains    = toset(["ORDERS", "ORDER_ITEMS", "DRIVERS", "DRIVER_SHIFTS", "RESTAURANTS",
+                      "USERS_MONGO", "USERS_MSSQL", "PAYMENT_EVENTS", "RECOMMENDATIONS", "SEARCH_EVENTS"])
   serverless = local.profile.task_compute == "serverless"
 }
 
@@ -555,7 +640,7 @@ resource "snowflake_task" "gate" {
   warehouse = local.serverless ? null : var.warehouse_name
   user_task_managed_initial_warehouse_size = local.serverless ? "XSMALL" : null
   serverless_task_max_statement_size       = local.serverless ? "XSMALL" : null
-  user_task_timeout_ms                     = 60000
+  user_task_timeout_ms                     = 10000
   suspend_task_after_num_failures          = 3
   schedule  { minutes = 1 }
   when      = "SYSTEM$STREAM_HAS_DATA('${var.database_name}.BRONZE.${each.key}_STREAM')"
@@ -615,16 +700,17 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 ---
 
-## Data Flow (profile B, one burst)
+## Data Flow (profile B, one cluster)
 
-1. `generate_load.py` commits a burst at *t0* and logs it.
+1. `generate_load.py` commits bursts at :00, :02, :04, :10, :12 and logs each.
 2. Debezium → Kafka → Snowpipe Streaming commits rows to Bronze (seconds).
-3. Within ≤ 1 min, each gate task with data runs **serverless**, writes `PENDING_RUNS`.
-4. The sensor sees Kafka activity in Prometheus (0 credits) → `pending`. While the burst is still
-   arriving (`quiet < 3`) or the last run was < *N* ago, it waits without touching Snowflake.
-5. Once settled and outside the window, one `SELECT` on `PENDING_RUNS` resumes `CDC_WH`, all rows of
-   the burst are marked consumed, one `cdc_pipeline_job` runs `dbt run` + `dbt test` on the same resume.
-6. `PROCESSING_LOG` records `finished_at`; `CDC_WH` suspends 60 s after the last query.
+3. Within ≤ 1 min, each gate task with data runs **serverless** and writes `PENDING_RUNS`.
+4. The sensor sees Kafka activity in Prometheus (0 credits) → `pending`. While a burst is arriving or
+   the window is closed, it waits without touching Snowflake.
+5. ~:07: settled, window open → one `SELECT` resumes `CDC_WH`; rows marked consumed with the run key;
+   one `cdc_pipeline_job` runs `dbt run` + `dbt test`.
+6. ~:15: second group settled, but the window holds it until ~:17 → second run.
+7. `PROCESSING_LOG` records `finished_at` and the run key; `CDC_WH` suspends 60 s after the last query.
 
 ---
 
@@ -633,10 +719,10 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | System | Contract | Change in this feature |
 |--------|----------|------------------------|
 | Kafka connector | Creates Bronze tables; reads `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE` | None |
-| Prometheus | `kafka_server_brokertopicmetrics_messagesin{topic=~"pg[.]public[.].*"}` | None |
-| dbt | Reads `SNOWFLAKE_*` env vars | `sources.yml` database from env var |
-| GitHub | Environment `snowflake-dev` with required reviewer; secrets `TF_SNOWFLAKE_PRIVATE_KEY`, AWS role for state | New |
-| AWS S3 | Terraform state bucket with native lockfile | New (outside Snowflake budget) |
+| Prometheus | `kafka_server_brokertopicmetrics_messagesin{topic=~"pg[.]public[.].*"}`, 15 s scrape | None |
+| dbt | Reads `SNOWFLAKE_*` env vars; `sources.yml` hard-codes `CDC_POC` | None |
+| GitHub | Environments `snowflake-plan` (no reviewer) and `snowflake-dev` (reviewer); OIDC to AWS | New |
+| AWS S3 | State bucket, native lockfile | New (outside the Snowflake budget) |
 
 ---
 
@@ -644,54 +730,58 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 | Level | What | How | AT |
 |-------|------|-----|----|
-| Static | Terraform format, validation, plan | CI on every PR, both roots | AT-009 |
-| Unit | `gate.decide` / `after_query`: legacy parity with v2, settling, window, retry, cursor migration | `pytest`, table-driven; includes stranding, two-runs-per-burst, continuous-traffic starvation and lagging-task scenarios | AT-005, AT-006 |
-| Integration | Apply on dev, then `plan` shows no changes | CI apply job + second plan | AT-001 |
-| Account checks | `SHOW WAREHOUSES`, `SHOW RESOURCE MONITORS`, `SHOW TASKS` | `scripts/verify_governance.sql` (updated) | AT-002, 003, 004 |
-| Generator | Same seed twice → identical counts | `pytest` on the plan the generator builds, no DB | AT-007 |
+| Static | fmt, validate, plan | CI on every PR, both roots (Decision 11) | AT-009 |
+| Unit | `gate.decide` / `after_query`: legacy parity, settle, window, starvation guard, retry, two consecutive queries, cursor migration | `pytest`, table-driven + randomized parity | AT-005, AT-006 |
+| Unit | Generator: same seed → identical schedule and row counts | `pytest`, no database | AT-007 |
+| Integration | Apply on dev, then `plan` shows no changes | CI apply job | AT-001 |
+| Account | `SHOW WAREHOUSES`, `SHOW RESOURCE MONITORS`, `SHOW TASKS`, budget `GET_CUSTOM_ACTIONS` | `verify_governance.sql` | AT-002, 003, 004 |
 | Measurement | Protocol queries | Validator session | AT-008, 010 |
 
 ---
 
 ## Error Handling
 
-| Failure | Behaviour |
-|---------|-----------|
-| Bronze tables missing at `pipeline` plan | Data source check fails with "run the stack and wait for first rows" |
-| Gate task fails 3× | Task suspends itself; `budget-alert` / task-failure runbook |
-| Monitor suspends `CDC_WH` | dbt runs fail fast; sensor keeps rows pending; `monitor-suspended` runbook |
-| Prometheus down | Sensor fails open (v2 behaviour) — costs a resume, never loses data |
-| Stack machine sleeps during a window | Gap detected in `commits.csv`; window voided and rerun |
+| Failure | Behaviour | Runbook |
+|---------|-----------|---------|
+| Bronze tables missing | `pipeline` plan skipped with a notice; apply blocked | — |
+| Gate task fails 3× | Task suspends itself | `gate-task-failure.md` |
+| Budget reaches its limit | Gate tasks suspended by the custom action; not auto-resumed | `budget-alert.md` |
+| Monitor suspends `CDC_WH` | dbt runs fail fast; sensor keeps rows pending | `monitor-suspended.md` |
+| Prometheus down | Sensor fails open (v2 behaviour) — a resume, never lost data | `connector-down.md` |
+| Stack machine sleeps | Gap in `commits.csv`; window voided and rerun | `PROTOCOL.md` |
 
 ---
 
 ## Configuration
 
-| Variable | Where | Default | Notes |
-|----------|-------|---------|-------|
-| `cost_profile` | both Terraform roots | `optimized` | `baseline` only during window A |
+| Variable | Where | Value | Notes |
+|----------|-------|-------|-------|
+| `cost_profile` | `terraform/env/dev.tfvars` only | `optimized` (`baseline` during window A) | No default in code |
 | `database_name`, `warehouse_name`, `role_name`, `readonly_role_name` | Terraform | `CDC_POC`, `CDC_WH`, `CDC_ROLE`, `CDC_ROLE_RO` | Decision 3 |
-| `cdc_wh_monitor_quota`, `account_monitor_quota`, `budget_limit` | Terraform | 25 / 50 / 60 credits | Decision 8 — provisional |
-| `BATCH_WINDOW_MINUTES` | Dagster env | `10` | `0` reproduces v2 |
-| `LOAD_SEED`, `LOAD_BURST_MINUTES`, `LOAD_ROWS_PER_BURST` | generator | `42`, `60`, `200` | Calibrated on Day 7 |
+| `cdc_wh_monitor_quota`, `account_monitor_quota`, `budget_monthly_limit` | `dev.tfvars` / `budget.sql` | 25 / 40 / 10 credits | Decision 8; confirm credit price first |
+| `BATCH_WINDOW_MINUTES` | Dagster `.env` | `10` (`0` during window A) | Decision 6 |
+| `QUIET_CYCLES` | `gate.py` constant | 3 | Revisited after the dry run |
+| `LOAD_SEED`, `LOAD_CLUSTER_MINUTES`, `LOAD_BURST_OFFSETS`, `LOAD_ROWS_PER_BURST` | generator | `42`, `120`, `0,2,4,10,12`, `200` | Calibrated in the dry run |
 
 ---
 
 ## Security Considerations
 
-- Terraform runs as `TERRAFORM_SVC` with key-pair auth; roles split by provider alias (Decision 9).
-- The private key exists only as a GitHub **environment** secret (not a repository secret), so
-  workflows from forks and unprotected branches cannot read it. The repo is public.
-- Public keys of service users are variables (not secret); private keys never enter Terraform state.
-- Agents never run `apply` (Constitution R1): they run `plan` locally against dev with read-only use.
+- `TERRAFORM_SVC` (apply, incl. `ACCOUNTADMIN`) exists only in the reviewer-protected `snowflake-dev`
+  environment and on the owner's machine. Agents and PR plans use `TERRAFORM_PLAN_SVC` (read-only).
+- Environment secrets are not exposed to fork PRs; the repo is public.
+- Service users' public keys are variables; private keys never enter Terraform state.
+- The suspend procedure called by the budget is granted to the `SNOWFLAKE` application with the
+  minimum privileges the custom-action docs require, and does nothing but `ALTER TASK … SUSPEND`.
 
 ---
 
 ## Observability
 
 - `SHOW TASKS` + `TASK_HISTORY` for gate runs; `SERVERLESS_TASK_HISTORY` for their cost.
-- Budget notification and monitor notifications go to the account owner's e-mail.
-- Grafana: unchanged in this feature (cost dashboard is roadmap).
+- Budget and monitor notifications to the owner's e-mail; budget `GET_CUSTOM_ACTIONS` in
+  `verify_governance.sql`.
+- Grafana unchanged (cost dashboard is roadmap).
 
 ---
 
@@ -699,11 +789,13 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Provider lacks budget support or an account-level monitor assignment | Medium | Low | `scripts/budget.sql` and a versioned `ALTER ACCOUNT SET RESOURCE_MONITOR` step, documented as exceptions (A-002 fallback) |
-| Provider `snowflake_task` field combinations differ from Pattern 3 | Medium | Low | Pattern is a sketch; Build checks the resource docs first |
-| Laptop sleeps during 96 h of measurement | **High** | High | Disable sleep; detect gaps; rerun window. Option: run the stack on a small cloud VM for Days 8–11 |
-| Estimate is wrong in the favourable direction and biases reading | Medium | Medium | Estimate written down before measuring; Validator is a fresh session |
-| `WAREHOUSE_EVENTS_HISTORY` event names differ from assumed | Low | Low | Confirm on Day 7 dry run |
+| Laptop sleeps during ~100 h of windows | **High** | High | Cloud VM for Days 7–12, or sleep disabled; gap detection; rerun |
+| Provider lacks budget / account-monitor support | Medium | Low | Exceptions 2–3 (Decision 9) |
+| `snowflake_task` field combinations differ from Pattern 3 | Medium | Low | Pattern is a sketch; Build reads the resource docs first |
+| Budget refresh delay larger than assumed | Medium | Medium | Timeout bound holds regardless; worst case written in Decision 5 |
+| Dagster job start > 60 s after the sensor's query → two resumes per run | Medium | Low | Measured in the dry run; reported as is |
+| Estimate biases the reading | Medium | Medium | Estimate written before measuring; Validator is a fresh session |
+| `WAREHOUSE_EVENTS_HISTORY` event names differ | Low | Low | Confirmed in the dry run |
 
 ---
 
@@ -712,12 +804,13 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.1 | 2026-11-17 | Christian (with Claude) | Initial draft |
-| 0.2 | 2026-11-17 | Christian (with Claude) | Self-review: Decision 6 rewritten (settle-then-run; v1 of it paid two resumes per burst); requirement coverage table added |
-| 0.3 | 2026-11-17 | Christian (with Claude) | Simulation found starvation under continuous traffic; starvation guard added to Decision 6 / Pattern 4 |
+| 0.2 | 2026-11-17 | Christian (with Claude) | Self-review: Decision 6 rewritten (two resumes per burst); requirement coverage added |
+| 0.3 | 2026-11-17 | Christian (with Claude) | Simulation found starvation under continuous traffic; starvation guard added |
+| 0.4 | 2026-11-17 | Christian (with Claude) | Applied external review (4 blocking, 8 adjustments, minors): clustered load that exercises the window; idle window; switches at 00:00 UTC via versioned `tfvars`; plan identity + pipeline-plan skip (Decisions 11); causal freshness (Decision 7); attribution method (Decision 13); budget custom action + timeout 10 s with worst case stated (Decision 5); monitors `NEVER` (Decision 8); honest exception list and CONFIG tables in Terraform (Decision 9); S3 native lock (Decision 12); QA deviation recorded (F10); no dbt changes (Decision 3); after-trial plan. Owner decisions: 25-credit cap, automatic action, QA off in both, no `sources.yml` change. |
 
 ---
 
 ## Next Step
 
-Independent design review (fresh session, DEFINE + this file only). Then
-**Ready for:** `/build .claude/sdd/features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md`
+Reviewer confirms the four blocking findings are resolved (fresh session: DEFINE 1.3 + this file).
+Then **Ready for:** `/build .claude/sdd/features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md`
