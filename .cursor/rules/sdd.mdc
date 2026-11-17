@@ -1,0 +1,8 @@
+---
+description: Project rules — always read CLAUDE.md first
+alwaysApply: true
+---
+
+The rules for this repository live in `CLAUDE.md` and `.claude/sdd/CONSTITUTION.md`.
+Read both before any change. Do not duplicate their content here: if a rule is missing,
+add it to `CLAUDE.md` in the same PR.

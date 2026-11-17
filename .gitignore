@@ -67,6 +67,8 @@ docs/*
 # codigo cita ADR-0018/0019/0022 por numero -- sem estes arquivos versionados,
 # a referencia aponta para o nada.
 !docs/adr/
+!docs/runbooks/
+!docs/measurement/
 # `.claude/*` em vez de `.claude/` porque o git não desce em diretório excluído:
 # com `.claude/` a negação abaixo não teria efeito nenhum.
 .claude/*
@@ -74,6 +76,7 @@ docs/*
 # engenharia do repo, não conteúdo de curso — explica por que o código está como
 # está, e os commits referenciam esses arquivos.
 !.claude/sdd/
-.cursor/
+# v3: CLAUDE.md and the Cursor rule are the agents' source of truth and are versioned.
+.cursor/*
+!.cursor/rules/
 AGENTS.md
-CLAUDE.md
