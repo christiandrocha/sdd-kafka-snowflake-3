@@ -17,8 +17,8 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Define — awaiting approval | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) | Christian |
-| SCD2_RESTAURANTS | Define — awaiting approval | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
+| COST_GOVERNANCE | Define — approved 2026-11-17; Design next | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) | Christian |
+| SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
 
@@ -53,12 +53,12 @@ one PR at a time.
 
 ## 15-day plan
 
-Day 1 = **{to be set}**. Days 8–11 are inelastic: the A/B measurement needs calendar days of
+Day 1 = **2026-11-18** → Day 8–11 (measurement) = **Nov 25–28** · Day 15 (showable) = **Dec 2** · trial ends **Dec 17**. Days 8–11 are inelastic: the A/B measurement needs calendar days of
 controlled load. Any slip in week 1 comes out of week 2's polish, never out of the measurement.
 
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
 |-----|-----------------|------------------|-------------|
-| 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). Approve both DEFINEs. Check trial end date and credits. | — | — |
+| 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). ✅ Both DEFINEs approved. ✅ Trial ends Dec 17. | — | — |
 | 2 | DESIGN + second-opinion review | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | DESIGN + review | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Build: fixture of restaurant changes, `scd2` strategy | FT-03 |
@@ -76,9 +76,9 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 |---|------|-----------|-----------------------|
 | 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
 | 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor, within the trial balance |
-| 6 | Trial end date and remaining credits (*Admin → Billing*) | Blocks Day 8 if short | Add a payment method before Day 8 |
+| 6 | ~~Trial end date~~ — resolved: 2026-12-17. Balance "400": confirm unit (USD or credits) before DESIGN sizes the monitors | Open (unit only) | Assume USD 400 |
 | 3 | Repository name | No | `sdd-kafka-snowflake-3` |
-| 4 | Day 1 date | No | Next business day after DEFINE approval |
+| 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | Terraform state backend | No | S3 bucket + DynamoDB lock in the same AWS account |
 
 ## Next feature after v3 ships

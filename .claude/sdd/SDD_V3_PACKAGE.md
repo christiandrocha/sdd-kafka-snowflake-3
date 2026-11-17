@@ -194,8 +194,8 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Define — awaiting approval | [DEFINE](#part-5--define-cost_governance) | Christian |
-| SCD2_RESTAURANTS | Define — awaiting approval | [DEFINE](#part-6--define-scd2_restaurants) | Christian |
+| COST_GOVERNANCE | Define — approved 2026-11-17; Design next | [DEFINE](#part-5--define-cost_governance) | Christian |
+| SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](#part-6--define-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
 
@@ -230,12 +230,12 @@ one PR at a time.
 
 #### 15-day plan
 
-Day 1 = **{to be set}**. Days 8–11 are inelastic: the A/B measurement needs calendar days of
+Day 1 = **2026-11-18** → Day 8–11 (measurement) = **Nov 25–28** · Day 15 (showable) = **Dec 2** · trial ends **Dec 17**. Days 8–11 are inelastic: the A/B measurement needs calendar days of
 controlled load. Any slip in week 1 comes out of week 2's polish, never out of the measurement.
 
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
 |-----|-----------------|------------------|-------------|
-| 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). Approve both DEFINEs. Check trial end date and credits. | — | — |
+| 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). ✅ Both DEFINEs approved. ✅ Trial ends Dec 17. | — | — |
 | 2 | DESIGN + second-opinion review | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | DESIGN + review | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Build: fixture of restaurant changes, `scd2` strategy | FT-03 |
@@ -253,9 +253,9 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 |---|------|-----------|-----------------------|
 | 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
 | 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor, within the trial balance |
-| 6 | Trial end date and remaining credits (*Admin → Billing*) | Blocks Day 8 if short | Add a payment method before Day 8 |
+| 6 | ~~Trial end date~~ — resolved: 2026-12-17. Balance "400": confirm unit (USD or credits) before DESIGN sizes the monitors | Open (unit only) | Assume USD 400 |
 | 3 | Repository name | No | `sdd-kafka-snowflake-3` |
-| 4 | Day 1 date | No | Next business day after DEFINE approval |
+| 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | Terraform state backend | No | S3 bucket + DynamoDB lock in the same AWS account |
 
 #### Next feature after v3 ships
@@ -287,9 +287,9 @@ Azure variant · project templating (copier/cookiecutter) · `engagement/` kit f
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Draft — awaiting approval |
+| **Status** | Approved — ready for Design |
 | **Clarity Score** | 13/15 |
-| **Approved by** | — |
+| **Approved by** | Christian, 2026-11-17 |
 
 ---
 
@@ -440,7 +440,7 @@ its method. The README states the number we got, not the number we hoped for.
 |----|------------|------------------|------------|
 | A-001 | Gen1 standard warehouses can still be created in `sa-east-1` | REQ-02 falls back to documenting the Gen2 cost and sizing around it | [x] 2026-11-17 — probe warehouse created with `GENERATION = '1'` reported `generation = 1`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` was rejected |
 | A-002 | The Terraform provider supports the warehouse `GENERATION` property, serverless task and monitor settings | Unsupported settings go through a small, versioned SQL step called by CI, documented as an exception. **Higher risk since 2026-11-17:** `GENERATION` is the newer syntax and provider support must be checked first | [ ] Day 3 |
-| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [ ] Day 1 — check *Admin → Billing* |
+| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-28. Balance reported as "400" — confirm whether USD or credits before sizing monitors (DESIGN) |
 | A-003 | Serverless tasks bill per second, with no 60-second minimum, at a multiplier near 1 | H1 may fail; the measurement still ships | [ ] Day 2 (rate card) |
 | A-004 | The synthetic load is representative of a bursty CDC workload | Results do not generalize to continuous streaming; the README says so | [ ] By design |
 | A-005 | A and B can run on the same account without interfering | Run them sequentially with v2 paused if interference shows up in the dry run | [ ] Day 7 |
@@ -465,7 +465,7 @@ its method. The README states the number we got, not the number we hoped for.
 | # | Question | Blocking? | Owner | Default |
 |---|----------|-----------|-------|---------|
 | 1 | ~~Canonical resource-monitor values (v2 discrepancy 348/`NEVER` vs 20/`MONTHLY`)~~ | Resolved 2026-11-17 | — | Moot: v3 runs on a new account with **no** resource monitors. Terraform defines the canonical values from scratch; the DESIGN proposes them sized to the trial balance. |
-| 6 | Trial end date and remaining credits | No (blocks Day 8 if short) | Christian, Day 1 | — |
+| 6 | ~~Trial end date and remaining credits~~ | Resolved 2026-11-17 | — | Trial ends 2026-12-17; balance "400" (unit to confirm: USD or credits) |
 | 2 | Batching window *N* | No | Christian | 10 min |
 | 3 | Measurement credit cap | No | Christian | 15 credits |
 | 4 | Terraform state backend | No | Christian | S3 + DynamoDB lock |
@@ -479,6 +479,7 @@ its method. The README states the number we got, not the number we hoped for.
 |---------|------|--------|---------|
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
 | 1.1 | 2026-11-17 | Christian (with Claude) | New trial account `GWHUBCF-QQ53235`: open question 1 resolved as moot; REQ-02/AT-002 use `GENERATION = '1'` and pin query acceleration off; A-001 validated; A-002 risk raised; A-006 and trial constraint added |
+| 1.2 | 2026-11-17 | Christian | Approved. Scope frozen. |
 
 ---
 
@@ -503,9 +504,9 @@ its method. The README states the number we got, not the number we hoped for.
 | **Feature** | SCD2_RESTAURANTS |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Draft — awaiting approval |
+| **Status** | Approved — ready for Design |
 | **Clarity Score** | 13/15 |
-| **Approved by** | — |
+| **Approved by** | Christian, 2026-11-17 |
 
 ---
 
@@ -672,6 +673,7 @@ other domain can follow when a business need appears.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
+| 1.1 | 2026-11-17 | Christian | Approved. Scope frozen. |
 
 ---
 

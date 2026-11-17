@@ -11,9 +11,9 @@
 | **Feature** | SCD2_RESTAURANTS |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Draft — awaiting approval |
+| **Status** | Approved — ready for Design |
 | **Clarity Score** | 13/15 |
-| **Approved by** | — |
+| **Approved by** | Christian, 2026-11-17 |
 
 ---
 
@@ -180,6 +180,7 @@ other domain can follow when a business need appears.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
+| 1.1 | 2026-11-17 | Christian | Approved. Scope frozen. |
 
 ---
 
