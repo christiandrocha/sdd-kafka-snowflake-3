@@ -58,7 +58,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
 |-----|-----------------|------------------|-------------|
-| 1 | Resolve resource-monitor discrepancy on the live account (blocking). Approve both DEFINEs. Create repo from v2. | — | — |
+| 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). Approve both DEFINEs. Check trial end date and credits. | — | — |
 | 2 | DESIGN + second-opinion review | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | DESIGN + review | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Build: fixture of restaurant changes, `scd2` strategy | FT-03 |
@@ -74,8 +74,9 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 
 | # | Item | Blocking? | Default if unanswered |
 |---|------|-----------|-----------------------|
-| 1 | Canonical resource-monitor values (v2 docs say 348 credits / `NEVER`; `snowflake_setup.sql` says 20 / `MONTHLY`). Run `SHOW RESOURCE MONITORS` on the live account. | **Yes** (Terraform on Day 3) | — |
-| 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor |
+| 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
+| 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor, within the trial balance |
+| 6 | Trial end date and remaining credits (*Admin → Billing*) | Blocks Day 8 if short | Add a payment method before Day 8 |
 | 3 | Repository name | No | `sdd-kafka-snowflake-3` |
 | 4 | Day 1 date | No | Next business day after DEFINE approval |
 | 5 | Terraform state backend | No | S3 bucket + DynamoDB lock in the same AWS account |

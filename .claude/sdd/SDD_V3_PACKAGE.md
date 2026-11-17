@@ -64,8 +64,10 @@ regenerate it with `python tools/build_sdd_package.py`.
 
 | Item | Value |
 |------|-------|
+| Snowflake account | `GWHUBCF-QQ53235` (org `GWHUBCF`, locator `KT15332`) — **trial**, created 2026-11-17. Not the v2 account. |
 | Snowflake region | AWS `sa-east-1` (São Paulo) |
-| Objects | suffixed `_V3` so v2 keeps running untouched (e.g. `CDC_WH_V3`) — confirm in COST_GOVERNANCE design |
+| Objects | suffixed `_V3` (e.g. `CDC_WH_V3`) so the A/B config A can coexist — confirm in COST_GOVERNANCE design |
+| Warehouse generation | set with `GENERATION = '1'`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` is rejected on this account |
 | Agent environment | dev only (Constitution R2) |
 
 #### Forbidden for agents
@@ -233,7 +235,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
 |-----|-----------------|------------------|-------------|
-| 1 | Resolve resource-monitor discrepancy on the live account (blocking). Approve both DEFINEs. Create repo from v2. | — | — |
+| 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). Approve both DEFINEs. Check trial end date and credits. | — | — |
 | 2 | DESIGN + second-opinion review | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | DESIGN + review | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Build: fixture of restaurant changes, `scd2` strategy | FT-03 |
@@ -249,8 +251,9 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 
 | # | Item | Blocking? | Default if unanswered |
 |---|------|-----------|-----------------------|
-| 1 | Canonical resource-monitor values (v2 docs say 348 credits / `NEVER`; `snowflake_setup.sql` says 20 / `MONTHLY`). Run `SHOW RESOURCE MONITORS` on the live account. | **Yes** (Terraform on Day 3) | — |
-| 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor |
+| 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
+| 2 | Credit budget for the A/B measurement | No | Cap of 15 credits on the v3 monitor, within the trial balance |
+| 6 | Trial end date and remaining credits (*Admin → Billing*) | Blocks Day 8 if short | Add a payment method before Day 8 |
 | 3 | Repository name | No | `sdd-kafka-snowflake-3` |
 | 4 | Day 1 date | No | Next business day after DEFINE approval |
 | 5 | Terraform state backend | No | S3 bucket + DynamoDB lock in the same AWS account |
@@ -301,6 +304,10 @@ warehouse**, so each firing pays a full minute for two sub-second `INSERT`s; and
 sensor can trigger a full `dbt run` + `dbt test` **every minute** during a burst. All objects are
 also created by hand-run SQL, so none of this is reproducible on another account.
 
+The account v3 runs on (`GWHUBCF-QQ53235`, created 2026-11-17) confirms the defaults are not an
+accident of the old account: on day one, every warehouse the platform provisioned was Gen2, had
+query acceleration enabled, and `COMPUTE_WH` had a 300-second auto-suspend; no resource monitor existed.
+
 ---
 
 #### Target Users
@@ -331,7 +338,7 @@ also created by hand-run SQL, so none of this is reproducible on another account
 | ID | Requirement | Priority | Verified by |
 |----|-------------|----------|-------------|
 | REQ-01 | Terraform defines the v3 database, schemas, warehouse, roles, grants and resource monitors. Nothing in v3 is created by hand. | MUST | AT-001 |
-| REQ-02 | The warehouse generation is set explicitly in code to Gen1 (`STANDARD_GEN_1`), never left to the platform default. | MUST | AT-002 |
+| REQ-02 | Warehouse settings that drive cost are set explicitly in code, never left to platform defaults: generation via `GENERATION = '1'` (the account rejects `RESOURCE_CONSTRAINT = STANDARD_GEN_1` for this), and `ENABLE_QUERY_ACCELERATION = FALSE`. | MUST | AT-002 |
 | REQ-03 | A resource monitor at **account** level exists in addition to the per-warehouse monitor on the v3 warehouse, each with notify and suspend thresholds. | MUST | AT-003 |
 | REQ-04 | The ten gate tasks run as **serverless** tasks (no `WAREHOUSE`), keeping the `SYSTEM$STREAM_HAS_DATA` condition and the `SP_GATE_DOMAIN` semantics of ADR-0019. | MUST | AT-004 |
 | REQ-05 | The Dagster sensor enforces a minimum interval *N* between `cdc_pipeline_job` runs (env var, default 10 min). Pending rows accumulate and are consumed by the next run — none are lost. | MUST | AT-005, AT-006 |
@@ -368,7 +375,7 @@ its method. The README states the number we got, not the number we hoped for.
 | ID | Scenario | Given | When | Then |
 |----|----------|-------|------|------|
 | AT-001 | Reproducible infra | Empty v3 namespace on the account | CI applies `main` | All v3 objects exist; a second `plan` shows no changes |
-| AT-002 | Generation pinned | Warehouse applied | `SHOW WAREHOUSES LIKE 'CDC_WH_V3'` | `resource_constraint` = `STANDARD_GEN_1` |
+| AT-002 | Cost settings pinned | Warehouse applied | `SHOW WAREHOUSES LIKE 'CDC_WH_V3'` | `generation` = 1, `resource_constraint` = `STANDARD_GEN_1`, `enable_query_acceleration` = false |
 | AT-003 | Account cap | Monitors applied | `SHOW RESOURCE MONITORS` | One account-level and one v3-warehouse monitor, thresholds as in Terraform |
 | AT-004 | Serverless gate | Tasks applied, no traffic | `SHOW TASKS IN SCHEMA` + 1 h idle | Tasks have no warehouse; `SERVERLESS_TASK_HISTORY` shows no billable runs while streams are empty |
 | AT-005 | Batching window | A burst every 2 min for 30 min | Sensor runs | `cdc_pipeline_job` runs ≤ ⌈30/N⌉ + 1 times |
@@ -421,7 +428,8 @@ its method. The README states the number we got, not the number we hoped for.
 |------|------------|--------|
 | Timeline | 15 days total; measurement needs ≥ 4 calendar days (Days 8–11) | Build must finish by Day 7, including a protocol dry run |
 | Cost | Measurement budget capped at 15 credits (default, see open items) | The load profile must be sized to fit the cap |
-| Technical | v2 keeps running on the same account | v3 objects use a `_V3` suffix; Terraform never touches v2 objects |
+| Technical | v2 is not deployed on this account; config A (v2 settings) must be deployed here for the A/B | The protocol compares A and B on this account only; v2's historical figures (other account) are context, not baseline |
+| Account | Snowflake **trial** account `GWHUBCF-QQ53235` (AWS `sa-east-1`), created 2026-11-17 | Measurement (Days 8–11) must finish before the trial ends, and its credits come out of the trial balance; the repo must document what happens to the demo when the trial expires |
 | Technical | `ACCOUNT_USAGE` views lag behind real time | Results are read after the window closes, not live |
 
 ---
@@ -430,8 +438,9 @@ its method. The README states the number we got, not the number we hoped for.
 
 | ID | Assumption | If wrong, impact | Validated? |
 |----|------------|------------------|------------|
-| A-001 | Gen1 standard warehouses can still be created in `sa-east-1` | REQ-02 falls back to documenting the Gen2 cost and sizing around it | [ ] Day 1 |
-| A-002 | The Terraform provider supports the warehouse generation, serverless task and monitor settings needed | Unsupported settings go through a small, versioned SQL step called by CI, documented as an exception | [ ] Day 3 |
+| A-001 | Gen1 standard warehouses can still be created in `sa-east-1` | REQ-02 falls back to documenting the Gen2 cost and sizing around it | [x] 2026-11-17 — probe warehouse created with `GENERATION = '1'` reported `generation = 1`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` was rejected |
+| A-002 | The Terraform provider supports the warehouse `GENERATION` property, serverless task and monitor settings | Unsupported settings go through a small, versioned SQL step called by CI, documented as an exception. **Higher risk since 2026-11-17:** `GENERATION` is the newer syntax and provider support must be checked first | [ ] Day 3 |
+| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [ ] Day 1 — check *Admin → Billing* |
 | A-003 | Serverless tasks bill per second, with no 60-second minimum, at a multiplier near 1 | H1 may fail; the measurement still ships | [ ] Day 2 (rate card) |
 | A-004 | The synthetic load is representative of a bursty CDC workload | Results do not generalize to continuous streaming; the README says so | [ ] By design |
 | A-005 | A and B can run on the same account without interfering | Run them sequentially with v2 paused if interference shows up in the dry run | [ ] Day 7 |
@@ -455,7 +464,8 @@ its method. The README states the number we got, not the number we hoped for.
 
 | # | Question | Blocking? | Owner | Default |
 |---|----------|-----------|-------|---------|
-| 1 | Canonical resource-monitor values: v2 docs say 348 credits / `NEVER`, `snowflake_setup.sql` says 20 / `MONTHLY`. | **Yes** | Christian, Day 1, `SHOW RESOURCE MONITORS` | — |
+| 1 | ~~Canonical resource-monitor values (v2 discrepancy 348/`NEVER` vs 20/`MONTHLY`)~~ | Resolved 2026-11-17 | — | Moot: v3 runs on a new account with **no** resource monitors. Terraform defines the canonical values from scratch; the DESIGN proposes them sized to the trial balance. |
+| 6 | Trial end date and remaining credits | No (blocks Day 8 if short) | Christian, Day 1 | — |
 | 2 | Batching window *N* | No | Christian | 10 min |
 | 3 | Measurement credit cap | No | Christian | 15 credits |
 | 4 | Terraform state backend | No | Christian | S3 + DynamoDB lock |
@@ -468,12 +478,13 @@ its method. The README states the number we got, not the number we hoped for.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
+| 1.1 | 2026-11-17 | Christian (with Claude) | New trial account `GWHUBCF-QQ53235`: open question 1 resolved as moot; REQ-02/AT-002 use `GENERATION = '1'` and pin query acceleration off; A-001 validated; A-002 risk raised; A-006 and trial constraint added |
 
 ---
 
 #### Next Step
 
-**Ready for:** `/design .claude/sdd/features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md` — after approval and open question 1.
+**Ready for:** `/design .claude/sdd/features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md` — after approval.
 
 ---
 
