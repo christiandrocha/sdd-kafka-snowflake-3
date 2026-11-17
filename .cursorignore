@@ -1,0 +1,3 @@
+# Generated, read-only copy of the SDD artifacts (tools/build_sdd_package.py).
+# Agents must read the source files instead — see CLAUDE.md.
+.claude/sdd/SDD_V3_PACKAGE.md

@@ -1,0 +1,143 @@
+version: 2
+
+# Gold -- six aggregations over Silver. Unlike Silver, which was SELECT * of a
+# Bronze model, every Gold model has a GRAIN OF ITS OWN, and the grain is the
+# most important thing to test: it is what breaks silently when someone removes
+# a QUALIFY or flips a LEFT JOIN around.
+#
+# That is why every model here has unique + not_null on the grain key, at error
+# severity. This is not a formality: three of these models join tables whose
+# uniqueness is by TECHNICAL key (uuid) and not by the BUSINESS key used in the
+# join (driver_id, restaurant_id, cpf). Without the QUALIFY that reduces the
+# registry to one row per business key, the join multiplies fact rows and
+# inflates sums -- and unique on the grain is the only test that catches it.
+#
+# Severity: same convention as Silver (see models/silver/schema.yml).
+#   error -> an invariant guaranteed by the code in this repository
+#   warn  -> referential integrity between domains, which depends on the source
+
+models:
+  - name: gold_payment_lifecycle
+    description: >
+      One row per payment, with the instant of each lifecycle stage pivoted into a column. Reference model for the additive-partitionable pattern: incremental by payment_id, recomputing each affected payment in full.
+
+      SCAFFOLDING (accepted 2026-08-11): structurally correct, with no business meaning on this data. The 2,211 events are spread across 8 payment_ids, seven of them with more than 300 events each -- the synthetic generator reused identifiers, and no real payment has 322 lifecycle events. The durations this model computes are an artifact of the generator. No number from here goes into a decision or a demo without regenerating the seed.
+    columns:
+      - name: payment_id
+        description: "Model grain. Degenerate cardinality in the current data: 8 distinct values for 2,210 events."
+        tests: [unique, not_null]
+
+      - name: total_eventos
+        description: "Events making up the payment. Never zero -- the row only exists because there was an event."
+        tests: [not_null]
+
+      - name: ultimo_evento_ms
+        description: "The incremental's watermark. A null here would break detection of a changed payment on the next run."
+        tests: [not_null]
+
+  - name: gold_payments_by_status
+    description: >
+      Volume per payment lifecycle stage. A global ratio (the percentage depends on the total), materialized as incremental only to stabilize the identity of the 7 rows through MERGE.
+
+      SCAFFOLDING (accepted 2026-08-11): the per-stage distribution comes from 8 synthetic payment_ids with hundreds of events each. The percentages are arithmetically correct and commercially empty. See the note in gold_payment_lifecycle.
+    columns:
+      - name: event_name
+        description: "Model grain -- one row per stage."
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['created', 'authorized', 'captured', 'succeeded', 'settled', 'closed', 'refunded']
+
+      - name: eventos
+        tests: [not_null]
+
+      - name: pct_dos_eventos
+        description: "The stage's share of total events. The 7 rows sum to 100."
+        tests: [not_null]
+
+  - name: gold_payment_funnel
+    description: >
+      Payment lifecycle funnel with conversion against the top and against the previous stage. Full refresh by arithmetic necessity -- there is no incremental slice that produces a correct percentage.
+
+      SCAFFOLDING (accepted 2026-08-11): the conversion rates derive from 8 synthetic payment_ids that walked the cycle hundreds of times. The funnel's shape is an artifact of the generator, not payment behaviour. See the note in gold_payment_lifecycle.
+    columns:
+      - name: ordem
+        description: "Declared position of the stage in the funnel. Declared, not inferred: alphabetical order would put authorized before created."
+        tests: [unique, not_null]
+
+      - name: event_name
+        description: "Stage. `refunded` does not appear as a row -- it is a detour, not a step; it enters as the eventos_reembolso column."
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['created', 'authorized', 'captured', 'succeeded', 'settled', 'closed']
+
+      - name: eventos
+        description: "Zero is a legitimate value: a stage with no events still appears in the table, which is the point of a funnel."
+        tests: [not_null]
+
+  - name: gold_driver_performance
+    description: >
+      Cumulative performance per driver: shifts, orders, distance, earnings and derived measures. Additive-partitionable by driver_id, still on full refresh because of low volume (469 shifts).
+    columns:
+      - name: driver_id
+        description: >
+          Model grain. The `unique` here is the bodyguard of the QUALIFY that reduces silver_drivers to one row per driver_id: without it, a driver with two uuids would multiply their own shifts.
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('silver_drivers')
+              field: driver_id
+              config:
+                severity: warn
+
+      - name: turnos
+        tests: [not_null]
+
+      - name: sem_cadastro
+        description: "True for the 84 shifts whose driver_id does not exist in silver_drivers. Measured anyway, which is why the LEFT JOIN starts from the shifts."
+        tests: [not_null]
+
+  - name: gold_revenue_per_restaurant
+    description: >
+      Revenue and product mix per restaurant, aggregated from order_items (not from orders -- see the model header for the why and for the consequence on reconciliation).
+    columns:
+      - name: restaurant_id
+        description: "Model grain. Same bodyguard role as the QUALIFY described in gold_driver_performance."
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('silver_restaurants')
+              field: restaurant_id
+              config:
+                severity: warn
+
+      - name: receita_bruta
+        description: "Sum of item subtotals. Does NOT reconcile with the sum of orders.total_amount -- they measure different populations."
+        tests: [not_null]
+
+      - name: itens_vendidos
+        tests: [not_null]
+
+  - name: gold_user_behavior
+    description: >
+      Cumulative behaviour per user -- orders, spend, searches and recommendation interactions -- stitching CPF (orders) and numeric user_id (events) together through users_mongo.
+    columns:
+      - name: cpf
+        description: >
+          Model grain. This is the most important test in the layer: 95 CPFs have more than one registration in this database, and without the QUALIFY in the `perfil` CTE each order would be counted twice and gasto_total would come out inflated.
+        tests: [unique, not_null]
+
+      - name: pedidos
+        description: "Zero for those who never bought -- those users stay in the table on purpose."
+        tests: [not_null]
+
+      - name: gasto_total
+        tests: [not_null]
+
+      - name: nunca_comprou
+        tests: [not_null]

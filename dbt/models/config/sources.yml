@@ -1,0 +1,70 @@
+version: 2
+
+sources:
+  - name: bronze_raw
+    database: CDC_POC
+    schema: BRONZE
+    description: >
+      Raw tables written by the SnowflakeStreamingSinkConnector (v4) through
+      native Snowpipe Streaming. Under `snowflake.enable.schematization=true`
+      every field of the Kafka value becomes a TYPED, UPPERCASE column -- there
+      is no more RECORD_CONTENT VARIANT. RECORD_METADATA is still present (the
+      snowflake.metadata.* keys still exist in connector 4.1.0) and carries
+      offset, partition and CreateTime, used as the incremental watermark and
+      the deduplication tie-break in the Bronze models.
+
+      Besides the Postgres columns, every table has __OP and __SOURCE_TS_MS,
+      injected by Debezium's ExtractNewRecordState SMT
+      (transforms.unwrap.add.fields=op,source.ts_ms with the __ prefix).
+
+      Scope: 10 Tier 1 domains. The 10 Tier 2 ones left under
+      DEFINE_MIGRACAO_INGESTAO_V4 and are no longer ingested.
+    freshness:
+      warn_after:  {count: 5,  period: minute}
+      error_after: {count: 15, period: minute}
+    loaded_at_field: "RECORD_METADATA:CreateTime::TIMESTAMP_NTZ"
+    tables:
+      - name: PAYMENT_EVENTS
+        description: >
+          CDC of pg.public.payment_events. The `event` field is JSONB in
+          Postgres and Debezium serializes it as a string, so schematization
+          creates VARCHAR -- PARSE_JSON is still required in the model. The
+          internal timestamp arrives as an int or a float (scientific
+          notation), both epoch ms.
+
+      - name: ORDERS
+        description: >
+          CDC of pg.public.orders. Hub table -- links the domains through CPF
+          (user_key), CNPJ (restaurant_key), driver_id, payment UUID.
+          rating_key points at a removed Tier 2 domain.
+
+      - name: ORDER_ITEMS
+        description: >
+          CDC of pg.public.order_items. Largest volume in the project. Under
+          v2.1.2 it had its own Sink connector because of the client-side
+          buffer; in v4 that buffer does not exist and the domain went back to
+          the single connector.
+
+      - name: DRIVER_SHIFTS
+        description: CDC of pg.public.driver_shifts. Driver shifts.
+
+      - name: SEARCH_EVENTS
+        description: >
+          CDC of pg.public.search_events. A source column named TIMESTAMP --
+          referenced in quotes in the model.
+
+      - name: RECOMMENDATIONS
+        description: >
+          CDC of pg.public.recommendations. Same TIMESTAMP issue.
+
+      - name: USERS_MONGO
+        description: CDC of pg.public.users_mongo. CPF = user_key in orders.
+
+      - name: USERS_MSSQL
+        description: CDC of pg.public.users_mssql. Same CPF as users_mongo.
+
+      - name: RESTAURANTS
+        description: CDC of pg.public.restaurants. CNPJ = restaurant_key in orders.
+
+      - name: DRIVERS
+        description: CDC of pg.public.drivers. driver_id = driver_key in orders.

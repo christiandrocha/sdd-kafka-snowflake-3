@@ -1,0 +1,365 @@
+version: 2
+
+# Silver -- the same 10 domains as Bronze, resolved to the entity's current
+# state by resolve_cdc(). Because the macro does SELECT * over the Bronze
+# model, every column passes through without reprojection: the column-by-column
+# documentation lives in models/bronze/schema.yml and is NOT duplicated here.
+#
+# WHAT THIS LAYER TESTS, THEN: the three invariants Silver adds and that Bronze
+# has no way to guarantee.
+#
+#   1. unique + not_null on the key -- Silver collapsed N CDC versions into 1
+#      row per entity. In Bronze `unique` already passes because of the
+#      per-batch deduplication; here it comes to hold over the entire history,
+#      which is a much stronger assertion.
+#
+#   2. accepted_values on `op` WITHOUT the 'd' -- this is the test of
+#      resolve_cdc's delete filter. If a domain's strategy becomes 'log' in
+#      CONFIG.TABLE_METADATA, the macro starts preserving deletes and this test
+#      breaks on purpose, signalling that schema.yml has to follow the strategy
+#      change.
+#
+#      Note on NULL: `accepted_values` ignores nulls (NULL NOT IN (...) is
+#      NULL, not TRUE), and resolve_cdc preserves a row with a null op on
+#      purpose -- see item 2 of the macro's docstring. A row with a null op is
+#      caught by Bronze's not_null, which runs first; there is no redundant
+#      test here.
+#
+#   3. not_null on the key also covers the tombstone discard. A tombstone that
+#      escaped Bronze's filter would arrive here as a null-key row and would
+#      bring this test down.
+#
+# SEVERITY CONVENTION -- FIRST APPLICATION IN THE PROJECT, TO BE CONFIRMED.
+# Bronze uses the default severity (error) everywhere. Here:
+#
+#   error (default) -> an invariant guaranteed by the code in this repo. If it
+#                      fails, there is a bug in resolve_cdc or in the Bronze
+#                      model.
+#   warn            -> referential integrity between domains. The 10 CDC
+#                      streams are independent and have their own snapshot
+#                      timings: an order can arrive before its driver, and that
+#                      is normal latency, not a defect. Bringing the pipeline
+#                      down over it would be a false positive.
+#
+# This speaks to the SHOULD of DEFINE_GOVERNANCA_QUALIDADE_DADOS ("a proposed
+# severity convention exists"), which remains an unconfirmed Draft.
+
+models:
+  - name: silver_orders
+    description: >
+      Current state of each order, one per order_id. The model's hub -- it links the other domains through heterogeneous business keys.
+    columns:
+      - name: order_id
+        description: "Entity key. `unique` here holds over the whole CDC history, not just the batch."
+        tests: [unique, not_null]
+
+      - name: user_key
+        description: "User CPF."
+        tests:
+          - relationships:
+              to: ref('silver_users_mongo')
+              field: cpf
+              config:
+                severity: warn
+
+      - name: restaurant_key
+        description: "Restaurant CNPJ."
+        tests:
+          - relationships:
+              to: ref('silver_restaurants')
+              field: cnpj
+              config:
+                severity: warn
+
+      - name: driver_key
+        description: "Driver's driver_id. Null on an order not yet assigned -- `relationships` ignores nulls."
+        tests:
+          - relationships:
+              to: ref('silver_drivers')
+              field: driver_id
+              config:
+                severity: warn
+
+      - name: op
+        description: "CDC operation. No 'd': resolve_cdc discards deletes under the upsert strategy."
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        description: "Epoch ms of the Postgres commit. First ordering criterion of the CDC resolution."
+        tests: [not_null]
+
+      - name: kafka_offset
+        description: "Offset in the topic. Deterministic tie-break of the CDC resolution."
+        tests: [not_null]
+
+  - name: silver_order_items
+    description: >
+      Current state of each line item, one per order_item_id. Largest volume in the project.
+    columns:
+      - name: order_item_id
+        tests: [unique, not_null]
+
+      - name: order_id
+        description: "Order the item belongs to."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_orders')
+              field: order_id
+              config:
+                severity: warn
+
+      - name: restaurant_id
+        description: "Numeric restaurant ID."
+        tests:
+          - relationships:
+              to: ref('silver_restaurants')
+              field: restaurant_id
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_payment_events
+    description: >
+      Payment lifecycle events, one per event_id. Event sourcing -- the upsert guarantees idempotency against redelivery, not the collapse of business history: the many events of a single payment_id all remain present.
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+
+      - name: payment_id
+        description: >
+          Payment the event belongs to. No relationships test: the `payments` domain is Tier 2, removed from the pipeline, and there is no model holding that key to point at. orders.payment_key exists, but is not documented as the same identifier space -- confirm before creating the test.
+        tests: [not_null]
+
+      - name: event_name
+        description: "Event name in the lifecycle."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['created', 'authorized', 'captured', 'succeeded', 'settled', 'closed', 'refunded']
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_search_events
+    description: >
+      User searches, one per search_id. An append-only domain at the source (203 rows for 203 keys, zero deletes on 2026-08-10), registered as table_type='fact' with cdc_strategy='upsert'.
+    columns:
+      - name: search_id
+        tests: [unique, not_null]
+
+      - name: user_id
+        description: >
+          Numeric user ID, not CPF. No relationships to silver_users_mongo.user_id: the join is plausible but is not documented as such in models/bronze/schema.yml, and an integrity test over an assumed join produces noise, not signal.
+
+      - name: op
+        description: "If this domain's cdc_strategy becomes 'log', 'd' becomes a legitimate value and this test has to follow."
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_recommendations
+    description: >
+      ML recommendation events, one per event_id. Append-only at the source, the same pattern described in silver_search_events.
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+
+      - name: event_type
+        description: >
+          Recommendation event type. Vocabulary taken from the data on 2026-08-10, not from documentation: SELECT event_type, COUNT(*) GROUP BY 1 over the 255 materialized rows returned recommendation_served (78), add_to_cart (63), click (61), view (53). The previous list here -- view, click, purchase, dismiss -- came from the Bronze model's comment and was wrong at both ends: purchase and dismiss do not occur, add_to_cart and recommendation_served were not listed.
+        tests:
+          - accepted_values:
+              # Still at warn, but its nature changed: it was a guess, now it
+              # is a drift detector. A new value here means a new category at
+              # the source, not a badly written test -- and it is worth
+              # investigating before simply extending the list.
+              values: ['recommendation_served', 'add_to_cart', 'click', 'view']
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_driver_shifts
+    description: >
+      Current state of each driver shift, one per shift_id. A shift in progress receives several UPDATEs before closing -- this is the domain where the kafka_offset tie-break matters most.
+    columns:
+      - name: shift_id
+        tests: [unique, not_null]
+
+      - name: driver_id
+        description: "Driver on the shift."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_drivers')
+              field: driver_id
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_drivers
+    description: >
+      Delivery drivers, one per uuid.
+    columns:
+      - name: uuid
+        description: "CDC technical key."
+        tests: [unique, not_null]
+
+      - name: driver_id
+        description: >
+          Business key -- it is this, not the uuid, that orders.driver_key and driver_shifts.driver_id reference. `unique` at warn: a duplicate breaks nothing on its own, but causes fan-out in every join that uses this column.
+        tests:
+          - not_null
+          - unique:
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_restaurants
+    description: >
+      Restaurants, one per uuid.
+    columns:
+      - name: uuid
+        tests: [unique, not_null]
+
+      - name: cnpj
+        description: "Business key referenced by orders.restaurant_key. `unique` at warn for the same reason as drivers.driver_id."
+        tests:
+          - not_null
+          - unique:
+              config:
+                severity: warn
+
+      - name: restaurant_id
+        description: "Numeric ID referenced by order_items.restaurant_id."
+        tests:
+          - unique:
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_users_mongo
+    description: >
+      Users (MongoDB origin), one per uuid. CPF is what links this model to orders and to silver_users_mssql -- the two source systems have their own independent uuids for the same person.
+    columns:
+      - name: uuid
+        tests: [unique, not_null]
+
+      - name: cpf
+        description: "Business key referenced by orders.user_key."
+        tests:
+          - not_null
+          - unique:
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]
+
+  - name: silver_users_mssql
+    description: >
+      Extended user profile (MSSQL origin), one per uuid. Joins silver_users_mongo on CPF, not on uuid.
+    columns:
+      - name: uuid
+        tests: [unique, not_null]
+
+      - name: cpf
+        description: >
+          Same CPF as silver_users_mongo. The relationships test points there at warn: the two domains are independent CDC streams, so an extended profile can arrive before the matching user.
+        tests:
+          - not_null
+          - unique:
+              config:
+                severity: warn
+          - relationships:
+              to: ref('silver_users_mongo')
+              field: cpf
+              config:
+                severity: warn
+
+      - name: op
+        tests:
+          - accepted_values:
+              values: ['c', 'u', 'r']
+
+      - name: source_ts_ms
+        tests: [not_null]
+
+      - name: kafka_offset
+        tests: [not_null]

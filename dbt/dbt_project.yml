@@ -1,0 +1,56 @@
+name: sdd_kafka_snowflake
+version: '2.0.0'
+config-version: 2
+profile: sdd_kafka_snowflake
+
+model-paths:  ["models"]
+test-paths:   ["tests"]
+macro-paths:  ["macros"]
+target-path:  "target"
+clean-targets: ["target", "dbt_packages"]
+
+# EACH BLOCK DECLARES WHAT THE LAYER ACTUALLY USES.
+#
+# Until 2026-08-10 all three blocks declared `incremental` + `merge`, inherited
+# from when the folders were empty. No silver or gold model used that: the 10
+# in Silver and 4 of the 6 in Gold are `table`. The default was not merely dead
+# letter -- it was a trap. A new model dropped into models/silver/ would inherit
+# `incremental` with `merge` and NO `unique_key`, and in that combination dbt
+# degrades to a plain append: every run reinserts everything, silently.
+#
+# Why each layer is what it is:
+#
+#   bronze -> incremental/merge. Raw CDC append, with a watermark on
+#             kafka_created_at and a MERGE on the business key, so it is
+#             idempotent over Snowpipe Streaming redelivery.
+#
+#   silver -> table. MERGE does not delete rows. In an incremental model a key
+#             deleted at the source would survive in Silver forever, because
+#             the `op='d'` row is filtered by resolve_cdc and never reaches the
+#             merge. See the header of silver_orders.sql.
+#
+#   gold   -> table as the safe default (a rebuild is always correct, at worst
+#             slow). The two models that are genuinely additive per key --
+#             gold_payment_lifecycle and gold_payments_by_status -- declare
+#             `incremental` in their own file, along with the `unique_key` and
+#             the `on_schema_change` they depend on.
+#
+# `incremental_strategy` and `on_schema_change` were removed from the silver and
+# gold blocks: dbt only consults them for an incremental materialization, so
+# here they were inert and suggested a behaviour the layer does not have.
+models:
+  sdd_kafka_snowflake:
+    bronze:
+      +materialized: incremental
+      +schema: BRONZE
+      +incremental_strategy: merge
+      +on_schema_change: sync_all_columns
+      +tags: ["bronze", "cdc"]
+    silver:
+      +materialized: table
+      +schema: SILVER
+      +tags: ["silver", "cdc"]
+    gold:
+      +materialized: table
+      +schema: GOLD
+      +tags: ["gold", "analytics"]

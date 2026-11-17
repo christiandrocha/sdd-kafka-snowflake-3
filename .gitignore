@@ -1,0 +1,79 @@
+.DS_Store
+
+# Secrets — never commit credentials
+.env
+**/.env
+*.env.local
+*.key
+*.pem
+
+# Python project venvs & caches (demos/)
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Massa de teste — 52 arquivos JSON, ~47 MB, 115.052 registros.
+# Copiada de ../sdd-kafka-snowflake/tests/data, filtrada para os 10 domínios
+# Tier 1. Não versionar: é dado de origem reproduzível, não código.
+tests/data/
+
+# Artefatos gerados do dbt — recriáveis, não versionar.
+# dbt_packages/ vem de `dbt deps` (fixado por package-lock.yml, esse sim versionado)
+dbt/dbt_packages/
+# target/ vem de `dbt parse|run` — manifest.json, SQL compilado, run_results.json
+dbt/target/
+dbt/logs/
+# id anônimo de telemetria, gerado por máquina
+dbt/.user.yml
+
+# Large media — use external storage or LFS, not git
+*.mp4
+*.mov
+*.webm
+*.screenstudio/
+
+# Local recordings
+aulas/
+screenstudio/
+
+# Tooling caches
+.playwright-mcp/
+
+# Editor/OS noise
+.vscode/
+.idea/
+*.swp
+*~
+
+# PR-4 cached demo image (downloaded at runtime)
+demos/**/sample_image.jpg
+*.p8
+
+# Chaves Snowflake — o diretório inteiro, inclusive as .pub
+keys/
+
+# ── Escopo deste repositório ────────────────────────────────────────────
+# Este repo público cobre apenas a stack Kafka → Snowflake.
+# O conteúdo do curso (Formação AI Data Engineer) vive fora dele.
+presentation/
+demos/
+images/
+# `docs/*` em vez de `docs/` pelo mesmo motivo do `.claude/*` abaixo: com o
+# diretorio inteiro excluido o git nao desce nele e a negacao nao teria efeito.
+docs/*
+# Excecao: os ADRs sao engenharia deste pipeline, nao conteudo de curso. O
+# codigo cita ADR-0018/0019/0022 por numero -- sem estes arquivos versionados,
+# a referencia aponta para o nada.
+!docs/adr/
+# `.claude/*` em vez de `.claude/` porque o git não desce em diretório excluído:
+# com `.claude/` a negação abaixo não teria efeito nenhum.
+.claude/*
+# Exceção: o registro SDD deste pipeline (DEFINE/DESIGN/BUILD_REPORT/SHIPPED) é
+# engenharia do repo, não conteúdo de curso — explica por que o código está como
+# está, e os commits referenciam esses arquivos.
+!.claude/sdd/
+.cursor/
+AGENTS.md
+CLAUDE.md
