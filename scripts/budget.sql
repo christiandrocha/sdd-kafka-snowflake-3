@@ -86,7 +86,12 @@ CALL CDC_POC.CONFIG.CDC_BUDGET!ADD_CUSTOM_ACTION(
     100);
 CALL CDC_POC.CONFIG.CDC_BUDGET!REMOVE_CYCLE_START_ACTION();
 
--- 5. Read-back (AT-003; verify_governance.sql repeats the checks) ------------
+-- 5. Read access for verify_governance.sql, which runs as the read-only plan
+--    role (DESIGN 1.2, BUILD_REPORT run 3). The budget owner grants its own
+--    VIEWER instance role; re-granting is a no-op.
+GRANT SNOWFLAKE.CORE.BUDGET ROLE CDC_POC.CONFIG.CDC_BUDGET!VIEWER TO ROLE TERRAFORM_PLAN_ROLE;
+
+-- 6. Read-back (AT-003; verify_governance.sql repeats the checks) ------------
 CALL CDC_POC.CONFIG.CDC_BUDGET!GET_SPENDING_LIMIT();            -- 10
 CALL CDC_POC.CONFIG.CDC_BUDGET!GET_REFRESH_TIER();              -- TIER_1H
 CALL CDC_POC.CONFIG.CDC_BUDGET!GET_BUDGET_SCOPE();              -- resources: CDC_POC

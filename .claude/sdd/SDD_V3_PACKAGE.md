@@ -212,7 +212,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–6 built (PR #1 + stacked PR, open); DESIGN 1.2 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
+| COST_GOVERNANCE | Build — items 1–6 merged (#1, #2); 7–9 built (PR pending); DESIGN 1.2 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](#part-8--define-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
@@ -1501,7 +1501,7 @@ SHOW WAREHOUSES LIKE 'PROBE_WH_P1%';
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](#part-6--design-cost_governance) — v1.2 |
-| **Status** | In Progress — items 1–6 built; 7–22 pending |
+| **Status** | In Progress — items 1–9 built; 10–22 pending |
 
 ---
 
@@ -1696,11 +1696,120 @@ owner as a diff before this Build; the decisions were. Review the DESIGN diff in
 
 ---
 
+#### Run 3 — 2026-11-18 — manifest items 7–9
+
+Branch `feat/cost-governance-items-7-9` (from `main`, after #1 and #2). Requirements: REQ-04,
+REQ-01/02/03 (verification). DESIGN 1.2, no revision in this run. Build checklist B1 (code side)
+and B4 closed.
+
+##### Owner decisions (2026-11-18)
+
+1. `EXECUTE TASK` / `EXECUTE MANAGED TASK` granted by **`securityadmin`**: a **hypothesis to
+   validate at the Day 3 apply**. The DESIGN 1.3 text below is ready in case it has to move to
+   `accountadmin`.
+2. `create_readonly_role.sql` deleted too (deviation from item 8), after a grep.
+3. `verify_governance.sql` runs as **`TERRAFORM_PLAN_ROLE`**, with three grants: USAGE on
+   `CDC_CI_WH`, MONITOR on future tasks, and the budget's VIEWER instance role.
+4. A static test that SYSADMIN's USAGE on `CDC_WH` exists before the tasks. `gate_task_timeout_ms`
+   stays a variable, with the open item recorded.
+
+##### What the docs settled, and what they did not
+
+| Question | Answer | Source |
+|----------|--------|--------|
+| Who can grant `EXECUTE TASK` / `EXECUTE MANAGED TASK`? | **Not stated** by Snowflake. `GRANT <privileges>` covers object grants only (MANAGE GRANTS, ownership, WITH GRANT OPTION). The task docs' example uses ACCOUNTADMIN. A CIS benchmark summary (third party) says account-level grants are "implicitly reserved for the ACCOUNTADMIN and SECURITYADMIN roles", which supports the hypothesis without proving it. | [`GRANT <privileges>`](https://docs.snowflake.com/en/sql-reference/sql/grant-privilege); [Introduction to tasks](https://docs.snowflake.com/en/user-guide/tasks-intro); [Tenable CIS 2.2](https://tenable.com/audits/items/CIS_Snowflake_Foundations_v1.0.0_L1.audit:05abcfa959c6558c8c4c8d6d83b8769c) |
+| Does `SHOW TASKS` show the tasks to a non-owner? | Only to "a role with either the MONITOR or OPERATE privilege on a task" (or the owner). Future grants do not cover existing objects, so the plan role gets **both** a future MONITOR grant (platform) **and** one per task, granted by SYSADMIN as owner (pipeline). | [`SHOW TASKS`](https://docs.snowflake.com/en/sql-reference/sql/show-tasks) |
+| Does the budget instance role `VIEWER` exist with that name? | Yes: `GRANT SNOWFLAKE.CORE.BUDGET ROLE budgets_db.budgets_schema.my_budget!VIEWER TO ROLE budget_monitor;`, plus USAGE on the database and schema (the plan role already has both). | [*Monitor budgets*](https://docs.snowflake.com/en/user-guide/budgets/monitor) |
+| What can `VIEWER` call? | `CONFIRM_CUSTOM_ACTIONS_ACCESS` accepts "any instance role". For `GET_SPENDING_LIMIT` / `GET_REFRESH_TIER`, the docs do not say → O19 | [`CONFIRM_CUSTOM_ACTIONS_ACCESS`](https://docs.snowflake.com/en/sql-reference/classes/budget/methods/confirm_custom_actions_access) |
+
+`grep` for `create_readonly_role` before deleting it: README prose (item 22), the other deleted
+scripts, and Terraform comments. No workflow and no runbook calls it (`docs/runbooks/` does not
+exist yet).
+
+##### Files
+
+| # | File | Notes |
+|---|------|-------|
+| 7 | `terraform/pipeline/{versions,profiles}.tf` | Byte-identical copies of platform's (B1; tested) |
+| 7 | `terraform/pipeline/backend.tf` | Same bucket, key `…/pipeline.tfstate`, native lockfile |
+| 7 | `terraform/pipeline/providers.tf` | **Only** the `sysadmin` alias, `coalesce(var.plan_role, "SYSADMIN")`; preview feature `snowflake_procedure_sql_resource` |
+| 7 | `terraform/pipeline/variables.tf` | `gate_domains` (the 10 connector table names), `gate_task_timeout_ms` (default 10 000, validation ≥ 10 000, **PROVISIONAL** until the dry run), names, plan role |
+| 7 | `terraform/pipeline/procedures.tf` | `CONFIG.SP_GATE_DOMAIN(STREAM_FQN, DOMAIN_NAME)`, owner's rights, v2 body with database-qualified names (ADR-0019) |
+| 7 | `terraform/pipeline/gate.tf` | 10 append-only streams. 10 tasks: `optimized` = serverless, XSMALL/XSMALL, timeout var, 3 failures; `baseline` = `CDC_WH`, provider nulls (Snowflake defaults, as v2). 1-minute schedule, `SYSTEM$STREAM_HAS_DATA`. Per-task MONITOR to the plan role |
+| 7 | `terraform/platform/grants.tf` | SYSADMIN: USAGE on `CDC_WH`; `EXECUTE TASK` + `EXECUTE MANAGED TASK` on account (hypothesis). Plan role: USAGE on `CDC_CI_WH`; MONITOR on future tasks |
+| 7 | `terraform/pipeline/.terraform.lock.hcl` | Identical to platform's (2.23.0) |
+| 8 | `scripts/{streams_and_tasks,snowflake_setup,00_account_bootstrap,create_readonly_role}.sql` | Deleted (git keeps them) |
+| 8 | `.github/workflows/deploy.yml` | Two `echo` lines no longer name the deleted scripts. Otherwise `ci.yml`'s "referenced files exist" check turns red. The file itself goes in item 18 |
+| 8 | `scripts/init.sql` | One comment now points to `terraform/pipeline/gate.tf` |
+| 9 | `scripts/verify_governance.sql` | Rewritten in English, **assertive**. Four Scripting blocks RAISE (−20002 AT-002, −20003 monitors, −20005 budget, −20004 tasks). AT-002 uses the F6 read-back (`generation`, `resource_constraint = STANDARD_GEN_<n>`) — **B4 closed**. AT-004 checks 10 started tasks, compute per profile and task-level parameters. The idle `TASK_HISTORY` query is informational. Plan role on `CDC_CI_WH`; variables `cost_profile`, `gate_task_timeout_ms`, `check_pipeline` |
+| 9 | `scripts/budget.sql` | + `GRANT … CDC_BUDGET!VIEWER TO ROLE TERRAFORM_PLAN_ROLE` |
+| — | `tests/unit/tfparse.py` | Shared HCL block reader, extracted from `test_terraform_providers.py` |
+| — | `tests/unit/test_pipeline_root.py` | B1 identity; sysadmin-only; **USAGE on `CDC_WH` granted by platform, not pipeline** (mutation-checked: turning the grant into MONITOR fails it); EXECUTE TASK on platform/`securityadmin`; Tier-1 domains; Pattern 3 lines; timeout variable; per-task + future MONITOR; ADR-0019 body; old scripts gone |
+| — | `tests/unit/test_sql_scripts.py` | `verify_governance.sql` joins the non-destructive / CI-warehouse / no-e-mail checks; runs only as the plan role, no GRANT/ALTER/CREATE/INSERT/MERGE; every check RAISEs; budget VIEWER grant |
+
+##### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `terraform -chdir=terraform fmt -check -recursive` | ✅ exit 0 |
+| `terraform validate` (platform, pipeline; `init -backend=false`) | ✅ both valid; lock files identical |
+| `terraform console` (pipeline, backend-less copy, `dev.tfvars`) | ✅ `optimized` → serverless, no warehouse, 10 000 ms; `baseline` → `CDC_WH`, no timeout; `gate_task_timeout_ms=5000` rejected |
+| `ruff check .` | ✅ |
+| `pytest tests/unit -q` | ✅ 97 passed |
+| `terraform plan`, `snow sql` | ⏭️ Not run (no identities yet) |
+
+##### Deviations from DESIGN 1.2
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| `create_readonly_role.sql` deleted (not listed in item 8) | Fully replaced by `roles.tf`/`grants.tf`/`users.tf`; owner decision after grep | None |
+| `EXECUTE TASK`/`EXECUTE MANAGED TASK` and SYSADMIN USAGE on `CDC_WH` in **platform**, not pipeline | Account-level, independent of Bronze; keeps `pipeline` on one alias | Applied one step earlier |
+| `deploy.yml` edited (2 lines) before its deletion (item 18) | Deleting the scripts otherwise fails `ci.yml` | None |
+| `verify_governance.sql` is assertive and read-only (DESIGN: "read-only account checks") | v2 trap: an invisible object returns zero rows, not an error | CI fails on drift |
+| Plan role read grants + budget VIEWER | Needed for item 9 as decided | Two more grant resources; one SQL grant |
+
+##### DESIGN 1.3 — prepared, NOT applied (only if the Day 3 apply rejects SECURITYADMIN)
+
+Apply only if the platform apply fails on
+`snowflake_grant_privileges_to_account_role.sysadmin_execute_task` with an insufficient-privileges
+error. Paste the error into the row.
+
+- **Decision 9, named-exception table**, new row:
+  `| snowflake_grant_privileges_to_account_role.sysadmin_execute_task (EXECUTE TASK, EXECUTE MANAGED TASK on account → SYSADMIN) | SECURITYADMIN's MANAGE GRANTS was rejected for these global privileges at the Day 3 apply: "<error text>" | Day 3 apply log (run <id>) |`
+- **Revision history:**
+  `| 1.3 | <date> | Christian (with Claude) | Day 3 apply: SECURITYADMIN cannot grant EXECUTE TASK / EXECUTE MANAGED TASK; the grant joins the accountadmin named list. No scope change. |`
+- **Code, same PR:** `provider = snowflake.accountadmin # Decision 9 named exception` on that
+  resource. Add it to `ACCOUNTADMIN_ALLOWED` in `test_terraform_providers.py`. Change the
+  assertion in `test_execute_task_privileges_are_granted_by_platform` to `accountadmin`.
+
+##### Open issues (new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O16 | **Hypothesis:** SECURITYADMIN can grant `EXECUTE TASK` / `EXECUTE MANAGED TASK`. If the apply fails, use DESIGN 1.3 above | Day 3 apply | build-agent |
+| O17 | `resource_constraint = STANDARD_GEN_2` in profile `baseline` is assumed by symmetry with F6; confirm in the dry run (AT-002 is only formally checked in `optimized`) | Day 7 | build-agent |
+| O18 | Scripting constructs not yet run on the account: `SHOW PARAMETERS` via `EXECUTE IMMEDIATE` + `RESULT_SCAN(LAST_QUERY_ID())` inside a cursor loop; `COUNT_IF("IS_VALID")`; `SHOW RESOURCE MONITORS` `level`/`notify_at` values; `SHOW WAREHOUSES` `size` spelling | First CI run | build-agent |
+| O19 | `VIEWER` may not be enough for `GET_SPENDING_LIMIT` / `GET_REFRESH_TIER` (undocumented). If not, the budget block fails loudly. Fix with the least extra grant, never ACCOUNTADMIN | First CI run | build-agent |
+| O20 | Profile switch on existing tasks: the provider must move them warehouse ↔ serverless and unset timeout/failure limit when going to `baseline` (provider nulls). The second plan of the switch must be clean, and `verify_governance.sql` checks task-level parameters | Dry run (Day 7) | build-agent |
+| O21 | **`gate_task_timeout_ms` is provisional (10 000 ms).** Set it to max(10 s, 5 × p99 of `TASK_HISTORY`) after the dry run. Also unknown: whether serverless start-up counts toward the timeout (B2) | Day 7 | Christian |
+| O22 | `dev.tfvars` is shared: the pipeline root warns "value for undeclared variable" for platform-only variables (quotas, `owner_user_name`). Warnings only; revisit if they hide real ones in CI | Item 16 | build-agent |
+| O23 | README, `docs/adr/README.md`, ADR-0019/0020/0022/0025/0029/0030 and `sensors.py` comments still name the deleted scripts. ADRs are history and are left unchanged. README is item 22; `sensors.py` is item 11 | Items 11, 22 | — |
+
+##### Build checklist status after run 3
+
+| # | Status |
+|---|--------|
+| B1 | **Code side closed:** one `dev.tfvars`, identical `profiles.tf` (tested), `verify_governance.sql` asserts the profile on both roots' objects. Open: the two-root `main` job (item 16) |
+| B4 | **Closed:** AT-002 asserted in the F6 format |
+| B2, B3, B5 | Unchanged |
+
+---
+
 #### Next Step
 
-Owner reviews PR #1 (items 1–4), then the stacked PR for items 5–6. Next build:
-`/sdd-build COST_GOVERNANCE items 7-9` (pipeline root, retire old scripts, `verify_governance.sql`)
-or `items 10-14` (Python: `gate.py`, sensor, job, tests, load generator) — independent of each other.
+Owner reviews the PR for items 7–9. Next build: `/sdd-build COST_GOVERNANCE items 10-14` (Python:
+`gate.py`, sensor, job, tests, load generator) or `items 15-18` (measurement docs, `terraform.yml`,
+`ci.yml`, delete `deploy.yml`). Item 16 is what makes the Day 3 apply possible.
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
 
 ---

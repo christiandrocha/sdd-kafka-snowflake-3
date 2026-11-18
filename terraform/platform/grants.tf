@@ -5,8 +5,6 @@
 # dropped CDC_ROLE_RO's future SELECT in CONFIG.
 #
 # Granted by SECURITYADMIN (MANAGE GRANTS) except the ones named in Decision 9.
-# EXECUTE TASK / EXECUTE MANAGED TASK are granted in terraform/pipeline
-# (manifest item 7), with the task owner role.
 
 locals {
   db = snowflake_database.cdc.name
@@ -55,6 +53,38 @@ resource "snowflake_grant_privileges_to_account_role" "database_usage" {
     object_type = "DATABASE"
     object_name = local.db
   }
+}
+
+# --- SYSADMIN: prerequisites of the gate tasks in terraform/pipeline ---------
+# SYSADMIN owns the gate tasks (terraform/pipeline). These grants live here
+# because they are account-level and do not depend on Bronze, and platform is
+# applied before pipeline (Decision 1) — tests/unit/test_pipeline_root.py
+# checks that pipeline does not need them itself.
+
+# Profile baseline runs the tasks on CDC_WH, which ACCOUNTADMIN owns (F14).
+resource "snowflake_grant_privileges_to_account_role" "sysadmin_cdc_wh" {
+  provider          = snowflake.securityadmin
+  account_role_name = "SYSADMIN"
+  privileges        = ["USAGE"]
+  on_account_object {
+    object_type = "WAREHOUSE"
+    object_name = snowflake_warehouse.cdc.name
+  }
+}
+
+# EXECUTE TASK: run tasks the role owns. EXECUTE MANAGED TASK: only for
+# serverless tasks (profile optimized); granted in both profiles so a switch
+# changes nothing but the tasks (Decision 2).
+# HYPOTHESIS, to validate at the Day 3 apply: SECURITYADMIN's MANAGE GRANTS is
+# enough for these global privileges. The Snowflake docs do not say who can
+# grant them; their task examples use ACCOUNTADMIN. If the apply fails here,
+# move this resource to snowflake.accountadmin per the prepared DESIGN 1.3 text
+# (BUILD_REPORT, run 3).
+resource "snowflake_grant_privileges_to_account_role" "sysadmin_execute_task" {
+  provider          = snowflake.securityadmin
+  account_role_name = "SYSADMIN"
+  privileges        = ["EXECUTE MANAGED TASK", "EXECUTE TASK"]
+  on_account        = true
 }
 
 # --- CDC_ROLE ---------------------------------------------------------------
@@ -211,6 +241,32 @@ resource "snowflake_grant_privileges_to_account_role" "plan_warehouse" {
   on_account_object {
     object_type = "WAREHOUSE"
     object_name = each.value
+  }
+}
+
+# verify_governance.sql runs as the plan role (read-only) on CDC_CI_WH.
+resource "snowflake_grant_privileges_to_account_role" "plan_ci_warehouse_usage" {
+  provider          = snowflake.securityadmin
+  account_role_name = var.plan_role_name
+  privileges        = ["USAGE"]
+  on_account_object {
+    object_type = "WAREHOUSE"
+    object_name = snowflake_warehouse.ci.name
+  }
+}
+
+# SHOW TASKS lists only tasks the role owns or has MONITOR/OPERATE on.
+# Future grant here; terraform/pipeline adds a per-task grant for tasks that
+# already exist.
+resource "snowflake_grant_privileges_to_account_role" "plan_tasks_future" {
+  provider          = snowflake.securityadmin
+  account_role_name = var.plan_role_name
+  privileges        = ["MONITOR"]
+  on_schema_object {
+    future {
+      object_type_plural = "TASKS"
+      in_database        = local.db
+    }
   }
 }
 
