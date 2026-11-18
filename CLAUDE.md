@@ -18,7 +18,8 @@ v2 stays frozen as the baseline the measurements compare against.
 3. `.claude/sdd/_index.md` — active features, file ownership, plan.
 4. The folder of the feature you are working on, and the ADRs it references.
 
-Each SDD phase has a Cursor skill in `.cursor/skills/` (invoked only explicitly) (`/sdd-status`, `/sdd-define`,
+Each SDD phase is a skill in `.claude/skills/` (invoked only explicitly; read by Claude Code, including
+inside Cursor) (`/sdd-status`, `/sdd-brainstorm`, `/sdd-define`,
 `/sdd-design`, `/sdd-review`, `/sdd-build`, `/sdd-validate`, `/sdd-ship`, `/sdd-retro`,
 `/sdd-fasttrack`). When the user runs one, follow its `SKILL.md` exactly; it overrides general habits.
 `/sdd-review` and `/sdd-validate` must run in a chat that has not worked on the feature.

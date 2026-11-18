@@ -6,7 +6,7 @@ is the rules that hold in every phase; `_index.md` is the live status.
 
 ## Lifecycle
 
-| # | Phase | Cursor skill (`/name`) | Chat | Artifact (in `features/<FEATURE>/`) | Exit gate |
+| # | Phase | Skill (`/name`) | Chat | Artifact (in `features/<FEATURE>/`) | Exit gate |
 |---|-------|----------------|------|-------------------------------------|-----------|
 | 0 | Brainstorm | `/sdd-brainstorm <FEATURE> <idea>` | any | `BRAINSTORM_<FEATURE>.md` (in `backlog/`) | A direction is chosen. *Optional for small features.* |
 | 1 | Define | `/sdd-define <FEATURE>` | any | `DEFINE_<FEATURE>.md` | Approved by the owner. Clarity ≥ 12/15. **Scope freezes here.** |
@@ -19,7 +19,7 @@ is the rules that hold in every phase; `_index.md` is the live status.
 | — | Fast track | `/sdd-fasttrack <FT-id>` | any | row in `_index.md` | One acceptance test with evidence. |
 | — | Status | `/sdd-status` | any | — (read-only) | — |
 
-The skills live in `.cursor/skills/<name>/SKILL.md` with `disable-model-invocation: true`, so the agent
+The skills live in `.claude/skills/<name>/SKILL.md` with `disable-model-invocation: true`, so the agent
 never starts a phase on its own. They are the executable form of this table: if the process changes,
 the skill changes in the same PR (the Retro checks it).
 
