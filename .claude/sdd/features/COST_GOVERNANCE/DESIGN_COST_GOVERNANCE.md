@@ -11,7 +11,7 @@
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | 1.2 — Ready for Build (owner decisions 2026-11-18 at the items 5–6 Build; 1.1 owner-reviewed; 1.0 signed off by independent review 2026-11-18) |
+| **Status** | 1.3 — Ready for Build (owner decisions 2026-11-18 at the items 16–18 Build; 1.1–1.2 owner decisions; 1.0 signed off by independent review 2026-11-18) |
 
 ---
 
@@ -460,6 +460,21 @@ means no plan (review finding 4). The repo is public.
 
 `ci.yml` keeps its lint/validate jobs and gains `pytest tests/unit`.
 
+**Consequence (recorded at Build, 2026-11-18, owner decision):** GitHub asks for the
+`snowflake-dev` approval **before** the apply job starts, and a plan file made by the read-only
+identity cannot be applied by `TERRAFORM_SVC`, because the plan carries `var.plan_role`. The
+reviewer therefore approves on the strength of the **PR plan**, and the apply job **re-plans**.
+`.github/scripts/plan_summary.py` reduces both plans to their changed (address, actions) pairs and
+compares them. A divergence, for example another merge in between, is a **warning in the job
+summary, never a failure**. When `terraform/pipeline` is skipped in a PR plan because Bronze does
+not exist yet, the skip is written to the job summary. Other details settled at Build:
+- `verify_governance.sql` runs with the read-only identity's key, also stored in `snowflake-dev`.
+- `BUDGET_NOTIFY_EMAIL` is a **secret**, not a variable, because variables are printed unmasked in
+  the logs of a public repository.
+- The AWS bucket and OIDC roles are a manual step: `docs/runbooks/terraform-state-bootstrap.md`,
+  with two roles (plan read-only, apply read-write), trust restricted to this repository and one
+  environment each, and bucket versioning mandatory.
+
 ---
 
 ### Decision 12: Terraform state in S3 with native locking
@@ -626,7 +641,7 @@ output, committed), and `docs/runbooks/after-trial.md` explains how to redeploy 
 | 13 | `tests/unit/test_gate.py` | Create | Parity, settle, window, starvation, retry, migration | 10 |
 | 14 | `tests/load/generate_load.py`, `tests/unit/test_generate_load.py` | Create | REQ-06 / AT-007; task-state check after each cluster | — |
 | 15 | `docs/measurement/{PROTOCOL.md,queries.sql,ATTRIBUTION.md,RESULTS_TEMPLATE.md}` | Create | REQ-07 | 14 |
-| 16 | `.github/workflows/terraform.yml` | Create | REQ-08 (Decision 11) | 2–7 |
+| 16 | `.github/workflows/terraform.yml`, `.github/scripts/{plan_summary,bronze_ready}.py`, `docs/runbooks/terraform-state-bootstrap.md` | Create | REQ-08 (Decision 11); state bootstrap runbook (Decision 12) | 2–7 |
 | 17 | `.github/workflows/ci.yml` | Modify | Add `pytest tests/unit` | 13 |
 | 18 | `.github/workflows/deploy.yml` | Delete | Disabled since v2; replaced by 16 | 16 |
 | 19 | `docs/runbooks/{connector-down,monitor-suspended,budget-alert,gate-task-failure,after-trial}.md` | Create | REQ-10 | 4–7 |
@@ -907,6 +922,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 1.0 | 2026-11-18 | Christian (independent review, fresh session) | Independent sign-off (fresh session): READY FOR BUILD, no blocking issues; Build notes recorded below. |
 | 1.1 | 2026-11-18 | Christian (with Claude, Build session) | Build found that only ACCOUNTADMIN can assign a warehouse to a monitor (F14): `CDC_WH` moves to the `accountadmin` alias, recorded as a named exception limited to listed resources and never used by a PR plan (Decisions 4, 9, 11; Pattern 2). Account-level monitor stays CI SQL, `scripts/account_monitor.sql` (exception 3, owner decision; `snowflake_current_account` as future alternative — F12). F6 completed with the provider side; F11 (preview resources), F13 (no budget resource) added. Manifest items 2 and 6, Security and Risks updated. No scope change. Reviewed by the owner (diff), not by an independent session. |
 | 1.2 | 2026-11-18 | Christian (with Claude, Build session) | Items 5–6 Build, owner decisions: budget refresh `TIER_1H`; no cycle-start action; `budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role instead of ACCOUNTADMIN, so the `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list. F8 now from official docs (6.5 h default / 1 h; actual actions once a month, one retry); Decision 5/8 worst case recomputed (~1.5 credits overshoot, ~63 total). SNOWFLAKE database-role grant confirmed. New `CDC_CI_WH` for the CI SQL steps (validity rules; owner decision). Not reviewed by an independent session. |
+| 1.3 | 2026-11-18 | Christian (with Claude, Build session) | Items 16–18 Build, owner decisions: Decision 11 consequence recorded (approval before the job, so the apply re-plans and compares with the PR plan, warning only; pipeline-skip notice in the job summary; read-only key in `snowflake-dev` for `verify_governance.sql`; `BUDGET_NOTIFY_EMAIL` as a secret). AWS state bootstrap as a documented manual step with least-privilege OIDC roles and mandatory bucket versioning (Decision 12). Manifest item 16 lists its helpers and runbook. Item 15 stays with the owner; the build agent drafted `queries.sql` only. Not reviewed by an independent session. |
 
 ---
 

@@ -78,7 +78,7 @@ resource "snowflake_grant_privileges_to_account_role" "sysadmin_cdc_wh" {
 # HYPOTHESIS, to validate at the Day 3 apply: SECURITYADMIN's MANAGE GRANTS is
 # enough for these global privileges. The Snowflake docs do not say who can
 # grant them; their task examples use ACCOUNTADMIN. If the apply fails here,
-# move this resource to snowflake.accountadmin per the prepared DESIGN 1.3 text
+# move this resource to snowflake.accountadmin per the prepared DESIGN 1.4 text
 # (BUILD_REPORT, run 3).
 resource "snowflake_grant_privileges_to_account_role" "sysadmin_execute_task" {
   provider          = snowflake.securityadmin
@@ -287,6 +287,24 @@ resource "snowflake_grant_privileges_to_account_role" "plan_schemas" {
   privileges        = ["USAGE", "MONITOR"]
   on_schema {
     schema_name = each.value.fully_qualified_name
+  }
+}
+
+# The PR plan job checks that the connector has created the Bronze tables
+# before planning terraform/pipeline (Decision 11): SHOW TABLES lists only
+# tables the role has a privilege on. REFERENCES is metadata-only. Granted at
+# DATABASE level on purpose: a schema-level future grant on BRONZE would take
+# precedence over — and silently cancel — the database-level future grants of
+# CDC_ROLE and CDC_ROLE_RO in that schema.
+resource "snowflake_grant_privileges_to_account_role" "plan_tables_future" {
+  provider          = snowflake.securityadmin
+  account_role_name = var.plan_role_name
+  privileges        = ["REFERENCES"]
+  on_schema_object {
+    future {
+      object_type_plural = "TABLES"
+      in_database        = local.db
+    }
   }
 }
 

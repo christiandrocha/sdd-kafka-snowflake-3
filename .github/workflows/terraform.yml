@@ -1,0 +1,489 @@
+# terraform.yml — Snowflake infrastructure as code (COST_GOVERNANCE, REQ-08 / AT-009).
+#
+# DESIGN_COST_GOVERNANCE Decision 11:
+#   static          every PR, forks included: fmt -check + validate, no secrets.
+#   plan            PRs from this repository: read-only plan of both roots as
+#                   TERRAFORM_PLAN_SVC (environment snowflake-plan, no reviewer),
+#                   posted to the job summary and as a PR comment.
+#   apply           push to main: environment snowflake-dev (required reviewer),
+#                   TERRAFORM_SVC. platform: plan -> apply -> second plan that must
+#                   be clean (AT-001); then the CI SQL steps (seed, account monitor,
+#                   budget); then pipeline, once it has been applied the first time;
+#                   then verify_governance.sql as the read-only identity.
+#   apply-pipeline  workflow_dispatch: the first pipeline apply, once the Kafka
+#                   connector has created the Bronze tables (Decision 1, F5).
+#
+# Consequence of Decision 11, recorded in the BUILD_REPORT (run 4): GitHub asks
+# for the environment approval BEFORE the apply job starts, and a plan made by
+# the read-only identity cannot be applied by TERRAFORM_SVC (the plan file
+# carries var.plan_role). So the reviewer approves on the strength of the PR
+# plan, and `apply` re-plans. The re-plan is compared with the PR plan
+# (.github/scripts/plan_summary.py); a divergence is a warning in the job
+# summary, never a failure (owner decision 2026-11-18).
+#
+# Constitution R1: no job runs `terraform destroy`; tests/unit/test_workflows.py
+# enforces it, together with the fork, environment and secret rules below.
+#
+# Configuration (names only — values live in GitHub, never in this file):
+#   repository variables  SNOWFLAKE_ACCOUNT, TF_STATE_BUCKET, TF_STATE_REGION,
+#                         DAGSTER_RSA_PUBLIC_KEY, DATA_AGENTS_RSA_PUBLIC_KEY,
+#                         CURSOR_RSA_PUBLIC_KEY (public keys, not secret)
+#   snowflake-plan        vars SNOWFLAKE_USER (TERRAFORM_PLAN_SVC), AWS_ROLE_ARN
+#                         secret SNOWFLAKE_PRIVATE_KEY
+#   snowflake-dev         vars SNOWFLAKE_USER (TERRAFORM_SVC), SNOWFLAKE_PLAN_USER,
+#                         AWS_ROLE_ARN
+#                         secrets SNOWFLAKE_PRIVATE_KEY, SNOWFLAKE_PLAN_PRIVATE_KEY,
+#                         BUDGET_NOTIFY_EMAIL (a secret so it is masked in this
+#                         public repo's logs — personal data, D1)
+# AWS bucket and OIDC roles: docs/runbooks/terraform-state-bootstrap.md.
+
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "scripts/*.sql"
+      - ".github/workflows/terraform.yml"
+      - ".github/scripts/**"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "scripts/*.sql"
+      - ".github/workflows/terraform.yml"
+      - ".github/scripts/**"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "What to apply (first pipeline apply, once Bronze exists)"
+        type: choice
+        options: [pipeline]
+        default: pipeline
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash  # explicit shell = bash -eo pipefail: a failing `terraform plan | tee` fails the step
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TERRAFORM_VERSION: "1.11.4"
+  SNOWFLAKE_CLI_VERSION: "3.32.1"
+  TF_VARS_FILE: ../env/dev.tfvars
+  # Tier-1 Bronze tables (terraform/pipeline var.gate_domains, ADR-0022).
+  BRONZE_TABLES: >-
+    ORDERS ORDER_ITEMS DRIVERS DRIVER_SHIFTS RESTAURANTS
+    USERS_MONGO USERS_MSSQL PAYMENT_EVENTS RECOMMENDATIONS SEARCH_EVENTS
+
+jobs:
+  # ---------------------------------------------------------------------------
+  static:
+    name: fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform -chdir=terraform fmt -check -recursive -no-color
+
+      - name: terraform validate (platform, pipeline)
+        run: |
+          for root in platform pipeline; do
+            terraform -chdir=terraform/$root init -backend=false -no-color
+            terraform -chdir=terraform/$root validate -no-color
+          done
+
+  # ---------------------------------------------------------------------------
+  plan:
+    name: plan (read-only)
+    needs: static
+    # Never for forks: environment secrets are not exposed to them (Decision 11).
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: snowflake-plan
+    concurrency:
+      group: terraform-plan-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write       # AWS OIDC for the state bucket
+      pull-requests: write  # plan comment
+    env:
+      TF_VAR_plan_role: TERRAFORM_PLAN_ROLE  # every provider alias uses the read-only role
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      TF_VAR_dagster_rsa_public_key: ${{ vars.DAGSTER_RSA_PUBLIC_KEY }}
+      TF_VAR_data_agents_rsa_public_key: ${{ vars.DATA_AGENTS_RSA_PUBLIC_KEY }}
+      TF_VAR_cursor_rsa_public_key: ${{ vars.CURSOR_RSA_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.TF_STATE_REGION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Snowflake CLI
+        run: pip install "snowflake-cli==${SNOWFLAKE_CLI_VERSION}"
+
+      - name: terraform init (platform, pipeline)
+        run: |
+          for root in platform pipeline; do
+            terraform -chdir=terraform/$root init -no-color \
+              -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+              -backend-config="region=${{ vars.TF_STATE_REGION }}"
+          done
+
+      - name: plan platform
+        working-directory: terraform/platform
+        run: |
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -out=tfplan | tee plan.txt
+          terraform show -json tfplan | python ../../.github/scripts/plan_summary.py summarize > ../../plan-summary-platform.json
+
+      - name: Bronze tables present?
+        id: bronze
+        run: |
+          state=$(snow sql -x -q "SHOW TABLES IN SCHEMA CDC_POC.BRONZE" --format json \
+                  | python .github/scripts/bronze_ready.py $BRONZE_TABLES)
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "Bronze: $state"
+
+      - name: plan pipeline
+        if: steps.bronze.outputs.state == 'ready'
+        working-directory: terraform/pipeline
+        run: |
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -out=tfplan | tee plan.txt
+          terraform show -json tfplan | python ../../.github/scripts/plan_summary.py summarize > ../../plan-summary-pipeline.json
+
+      - name: pipeline plan skipped (Bronze not created yet)
+        if: steps.bronze.outputs.state != 'ready'
+        run: |
+          msg="terraform/pipeline plan SKIPPED: Bronze tables not created yet (${{ steps.bronze.outputs.state }}). The Kafka connector creates them on its first write (DESIGN Decision 1, F5); then run the 'apply-pipeline' workflow_dispatch."
+          echo "::notice title=pipeline plan skipped::$msg"
+          echo "pipeline: skipped — Bronze not ready" > terraform/pipeline/plan.txt
+          echo '[]' > plan-summary-pipeline.json
+          {
+            echo "### terraform/pipeline — plan skipped"
+            echo
+            echo "$msg"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish plans (summary + PR comment)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## Terraform plan (read-only identity) — ${GITHUB_SHA::7}"
+            for root in platform pipeline; do
+              echo
+              echo "### terraform/$root"
+              echo '```text'
+              tail -c 30000 terraform/$root/plan.txt
+              echo '```'
+            done
+          } > plan-comment.md
+          cat plan-comment.md >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file plan-comment.md
+
+      - name: Keep plan summaries for the apply comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-summaries
+          path: plan-summary-*.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  apply:
+    name: apply (main)
+    needs: static
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: snowflake-dev
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write  # AWS OIDC for the state bucket
+      actions: read    # download the PR plan summaries
+    env:
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+      TF_VAR_dagster_rsa_public_key: ${{ vars.DAGSTER_RSA_PUBLIC_KEY }}
+      TF_VAR_data_agents_rsa_public_key: ${{ vars.DATA_AGENTS_RSA_PUBLIC_KEY }}
+      TF_VAR_cursor_rsa_public_key: ${{ vars.CURSOR_RSA_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.TF_STATE_REGION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Snowflake CLI
+        run: pip install "snowflake-cli==${SNOWFLAKE_CLI_VERSION}"
+
+      - name: terraform init (platform, pipeline)
+        run: |
+          for root in platform pipeline; do
+            terraform -chdir=terraform/$root init -no-color \
+              -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+              -backend-config="region=${{ vars.TF_STATE_REGION }}"
+          done
+
+      - name: Fetch the PR plan summaries
+        id: pr_plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p pr-plan
+          pr_head=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0].head.sha // empty')
+          run_id=""
+          if [ -n "$pr_head" ]; then
+            run_id=$(gh run list --workflow terraform.yml --commit "$pr_head" --event pull_request \
+                       --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          fi
+          if [ -n "$run_id" ] && gh run download "$run_id" -n plan-summaries -D pr-plan; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=no PR plan::No successful PR plan found for ${GITHUB_SHA::7}; the re-plan cannot be compared."
+            echo "> ⚠️ No PR plan found for this commit — the apply re-plan was not compared." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # --- platform: plan -> compare -> apply -> second plan (AT-001) ----------
+      - name: platform — re-plan
+        working-directory: terraform/platform
+        run: |
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -out=tfplan
+          terraform show -json tfplan | python ../../.github/scripts/plan_summary.py summarize > ../../apply-summary-platform.json
+
+      - name: platform — compare with the PR plan (warn only)
+        if: steps.pr_plan.outputs.found == 'true'
+        run: |
+          diffs=$(python .github/scripts/plan_summary.py compare pr-plan/plan-summary-platform.json apply-summary-platform.json)
+          if [ -n "$diffs" ]; then
+            echo "::warning title=platform plan diverged::The apply re-plan differs from the reviewed PR plan."
+            { echo "### ⚠️ terraform/platform — re-plan differs from the PR plan"; echo '```text'; echo "$diffs"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### terraform/platform — re-plan matches the PR plan" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: platform — apply
+        working-directory: terraform/platform
+        run: terraform apply -no-color -lock-timeout=5m tfplan
+
+      - name: platform — second plan must be clean (AT-001)
+        working-directory: terraform/platform
+        run: |
+          set +e
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -detailed-exitcode
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "::error title=AT-001::terraform/platform shows changes right after apply (drift)."
+          fi
+          exit "$code"
+
+      # --- CI SQL steps (REQ-01 exceptions 2 and 3; seed data) -----------------
+      - name: seed_config.sql
+        env:
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: snow sql -x -f scripts/seed_config.sql
+
+      - name: account_monitor.sql (exception 3)
+        env:
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: snow sql -x -f scripts/account_monitor.sql
+
+      - name: budget.sql (exception 2)
+        env:
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+          BUDGET_NOTIFY_EMAIL: ${{ secrets.BUDGET_NOTIFY_EMAIL }}
+        run: snow sql -x -f scripts/budget.sql -D "notify_email=${BUDGET_NOTIFY_EMAIL}"
+
+      # --- pipeline: only after its first apply (workflow_dispatch) -----------
+      - name: pipeline — applied before?
+        id: pipeline_state
+        working-directory: terraform/pipeline
+        run: |
+          if [ -n "$(terraform state list -no-color)" ]; then
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+            echo "### terraform/pipeline — not applied yet; run the 'apply-pipeline' workflow_dispatch once Bronze exists" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: pipeline — re-plan
+        if: steps.pipeline_state.outputs.applied == 'true'
+        working-directory: terraform/pipeline
+        run: |
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -out=tfplan
+          terraform show -json tfplan | python ../../.github/scripts/plan_summary.py summarize > ../../apply-summary-pipeline.json
+
+      - name: pipeline — compare with the PR plan (warn only)
+        if: steps.pipeline_state.outputs.applied == 'true' && steps.pr_plan.outputs.found == 'true'
+        run: |
+          diffs=$(python .github/scripts/plan_summary.py compare pr-plan/plan-summary-pipeline.json apply-summary-pipeline.json)
+          if [ -n "$diffs" ]; then
+            echo "::warning title=pipeline plan diverged::The apply re-plan differs from the reviewed PR plan."
+            { echo "### ⚠️ terraform/pipeline — re-plan differs from the PR plan"; echo '```text'; echo "$diffs"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### terraform/pipeline — re-plan matches the PR plan" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: pipeline — apply
+        if: steps.pipeline_state.outputs.applied == 'true'
+        working-directory: terraform/pipeline
+        run: terraform apply -no-color -lock-timeout=5m tfplan
+
+      - name: pipeline — second plan must be clean (AT-001)
+        if: steps.pipeline_state.outputs.applied == 'true'
+        working-directory: terraform/pipeline
+        run: |
+          set +e
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -detailed-exitcode
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "::error title=AT-001::terraform/pipeline shows changes right after apply (drift)."
+          fi
+          exit "$code"
+
+      # --- verify as the read-only identity (B1) ------------------------------
+      - name: verify_governance.sql (read-only identity)
+        working-directory: terraform/pipeline
+        env:
+          SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_PLAN_USER }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PLAN_PRIVATE_KEY }}
+        run: |
+          # terraform console prints "undeclared variable" warnings on stdout: keep the last line.
+          profile=$(echo 'var.cost_profile' | terraform console -var-file="$TF_VARS_FILE" | tail -n 1 | tr -d '"')
+          timeout=$(echo 'var.gate_task_timeout_ms' | terraform console -var-file="$TF_VARS_FILE" | tail -n 1)
+          case "$profile" in baseline|optimized) ;; *) echo "::error::cost_profile unreadable: $profile"; exit 1;; esac
+          case "$timeout" in ''|*[!0-9]*) echo "::error::gate_task_timeout_ms unreadable: $timeout"; exit 1;; esac
+          snow sql -x -f ../../scripts/verify_governance.sql \
+            -D "cost_profile=${profile}" \
+            -D "gate_task_timeout_ms=${timeout}" \
+            -D "check_pipeline=${{ steps.pipeline_state.outputs.applied }}"
+
+  # ---------------------------------------------------------------------------
+  apply-pipeline:
+    name: apply pipeline (first time, manual)
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: snowflake-dev
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.TF_STATE_REGION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Snowflake CLI
+        run: pip install "snowflake-cli==${SNOWFLAKE_CLI_VERSION}"
+
+      - name: terraform init (pipeline)
+        working-directory: terraform/pipeline
+        run: |
+          terraform init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ vars.TF_STATE_REGION }}"
+
+      - name: Bronze tables present? (required)
+        env:
+          SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_PLAN_USER }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PLAN_PRIVATE_KEY }}
+        run: |
+          state=$(snow sql -x -q "SHOW TABLES IN SCHEMA CDC_POC.BRONZE" --format json \
+                  | python .github/scripts/bronze_ready.py $BRONZE_TABLES)
+          echo "Bronze: $state"
+          if [ "$state" != "ready" ]; then
+            echo "::error title=Bronze not ready::$state — start the stack and register the connectors first (DESIGN Decision 1)."
+            exit 1
+          fi
+
+      - name: pipeline — plan, apply, second plan (AT-001)
+        working-directory: terraform/pipeline
+        run: |
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -out=tfplan
+          terraform apply -no-color -lock-timeout=5m tfplan
+          set +e
+          terraform plan -no-color -lock-timeout=5m -var-file="$TF_VARS_FILE" -detailed-exitcode
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "::error title=AT-001::terraform/pipeline shows changes right after apply (drift)."
+          fi
+          exit "$code"
+
+      - name: verify_governance.sql (read-only identity)
+        working-directory: terraform/pipeline
+        env:
+          SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_PLAN_USER }}
+          SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PLAN_PRIVATE_KEY }}
+        run: |
+          # terraform console prints "undeclared variable" warnings on stdout: keep the last line.
+          profile=$(echo 'var.cost_profile' | terraform console -var-file="$TF_VARS_FILE" | tail -n 1 | tr -d '"')
+          timeout=$(echo 'var.gate_task_timeout_ms' | terraform console -var-file="$TF_VARS_FILE" | tail -n 1)
+          case "$profile" in baseline|optimized) ;; *) echo "::error::cost_profile unreadable: $profile"; exit 1;; esac
+          case "$timeout" in ''|*[!0-9]*) echo "::error::gate_task_timeout_ms unreadable: $timeout"; exit 1;; esac
+          snow sql -x -f ../../scripts/verify_governance.sql \
+            -D "cost_profile=${profile}" \
+            -D "gate_task_timeout_ms=${timeout}" \
+            -D "check_pipeline=true"
