@@ -79,4 +79,5 @@ docs/*
 # v3: CLAUDE.md and the Cursor rule are the agents' source of truth and are versioned.
 .cursor/*
 !.cursor/rules/
+!.cursor/skills/
 AGENTS.md
