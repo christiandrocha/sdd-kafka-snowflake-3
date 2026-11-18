@@ -10,8 +10,8 @@
 | **Date** | 2026-11-18 |
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.3 |
-| **Status** | In Progress — items 1–9 and 16–18 built (15: `queries.sql` draft only); 10–14, 15, 19–22 pending |
+| **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
+| **Status** | In Progress — items 1–13 and 16–18 built (15: `queries.sql` draft only); 14, 15, 19–22 pending |
 
 ---
 
@@ -215,7 +215,7 @@ and B4 closed.
 ### Owner decisions (2026-11-18)
 
 1. `EXECUTE TASK` / `EXECUTE MANAGED TASK` granted by **`securityadmin`**: a **hypothesis to
-   validate at the Day 3 apply**. The DESIGN 1.4 text below (numbered 1.3 when written) is ready in case it has to move to
+   validate at the Day 3 apply**. The DESIGN 1.5 text below (numbered 1.3 when written) is ready in case it has to move to
    `accountadmin`.
 2. `create_readonly_role.sql` deleted too (deviation from item 8), after a grep.
 3. `verify_governance.sql` runs as **`TERRAFORM_PLAN_ROLE`**, with three grants: USAGE on
@@ -278,9 +278,9 @@ exist yet).
 | `verify_governance.sql` is assertive and read-only (DESIGN: "read-only account checks") | v2 trap: an invisible object returns zero rows, not an error | CI fails on drift |
 | Plan role read grants + budget VIEWER | Needed for item 9 as decided | Two more grant resources; one SQL grant |
 
-### DESIGN 1.4 — prepared, NOT applied (only if the Day 3 apply rejects SECURITYADMIN)
+### DESIGN 1.5 — prepared, NOT applied (only if the Day 3 apply rejects SECURITYADMIN)
 
-(Numbered 1.3 when written in run 3; renumbered after run 4 used 1.3 for the Decision 11 consequence.)
+(Numbered 1.3 when written in run 3; renumbered 1.4 in run 4 and 1.5 in run 5, as those runs used 1.3 and 1.4.)
 
 Apply only if the platform apply fails on
 `snowflake_grant_privileges_to_account_role.sysadmin_execute_task` with an insufficient-privileges
@@ -289,7 +289,7 @@ error. Paste the error into the row.
 - **Decision 9, named-exception table**, new row:
   `| snowflake_grant_privileges_to_account_role.sysadmin_execute_task (EXECUTE TASK, EXECUTE MANAGED TASK on account → SYSADMIN) | SECURITYADMIN's MANAGE GRANTS was rejected for these global privileges at the Day 3 apply: "<error text>" | Day 3 apply log (run <id>) |`
 - **Revision history:**
-  `| 1.4 | <date> | Christian (with Claude) | Day 3 apply: SECURITYADMIN cannot grant EXECUTE TASK / EXECUTE MANAGED TASK; the grant joins the accountadmin named list. No scope change. |`
+  `| 1.5 | <date> | Christian (with Claude) | Day 3 apply: SECURITYADMIN cannot grant EXECUTE TASK / EXECUTE MANAGED TASK; the grant joins the accountadmin named list. No scope change. |`
 - **Code, same PR:** `provider = snowflake.accountadmin # Decision 9 named exception` on that
   resource. Add it to `ACCOUNTADMIN_ALLOWED` in `test_terraform_providers.py`. Change the
   assertion in `test_execute_task_privileges_are_granted_by_platform` to `accountadmin`.
@@ -298,7 +298,7 @@ error. Paste the error into the row.
 
 | # | Issue | Needed by | Owner |
 |---|-------|-----------|-------|
-| O16 | **Hypothesis:** SECURITYADMIN can grant `EXECUTE TASK` / `EXECUTE MANAGED TASK`. If the apply fails, use DESIGN 1.4 above | Day 3 apply | build-agent |
+| O16 | **Hypothesis:** SECURITYADMIN can grant `EXECUTE TASK` / `EXECUTE MANAGED TASK`. If the apply fails, use DESIGN 1.5 above | Day 3 apply | build-agent |
 | O17 | `resource_constraint = STANDARD_GEN_2` in profile `baseline` is assumed by symmetry with F6; confirm in the dry run (AT-002 is only formally checked in `optimized`) | Day 7 | build-agent |
 | O18 | Scripting constructs not yet run on the account: `SHOW PARAMETERS` via `EXECUTE IMMEDIATE` + `RESULT_SCAN(LAST_QUERY_ID())` inside a cursor loop; `COUNT_IF("IS_VALID")`; `SHOW RESOURCE MONITORS` `level`/`notify_at` values; `SHOW WAREHOUSES` `size` spelling | First CI run | build-agent |
 | O19 | `VIEWER` may not be enough for `GET_SPENDING_LIMIT` / `GET_REFRESH_TIER` (undocumented). If not, the budget block fails loudly. Fix with the least extra grant, never ACCOUNTADMIN | First CI run | build-agent |
@@ -404,10 +404,130 @@ It also makes AT-001 executable and runs exceptions 2 and 3.
 
 ---
 
+## Run 5 — 2026-11-18 — manifest items 10–13
+
+Branch `feat/cost-governance-items-10-13`, **stacked on `feat/cost-governance-items-16-18`
+(PR #4)**: `main` is still at DESIGN 1.2 and 1.3 lives in #4. Requirement: **REQ-05 / AT-005,
+AT-006**, with the Decision 7 support for REQ-07.
+
+### DESIGN 1.3 → 1.4 (before code; owner-reviewed diff, two conditions added)
+
+1. **Pattern 4 bug.** A simulation of Pattern 4 as written showed that continuous Kafka traffic
+   with an empty `PENDING_RUNS` makes the sensor query **every minute** (50 queries in 60 min,
+   *N* = 10). This is the state when gate tasks are suspended while load continues. Fix: an empty
+   starvation-guard query restarts `pending_since`, giving one query per *N*. The simulation is
+   kept as `test_regression_*`.
+2. **Item 12 → `assets.py`**, the code that actually writes `PROCESSING_LOG`. `assets.py` is now
+   owned by COST_GOVERNANCE. Checked: not in `_index`, not in SCD2's DEFINE, no fast track, no open PR.
+3. **Sensor order inverted**: `UPDATE` first, under the run key, inside one transaction; then read
+   the rows it marked.
+4. **Owner condition — failed run after the `UPDATE` (Decision 7): reprocess, never accept the
+   loss.** `pending_run_release_sensor` (a `run_failure_sensor` on `cdc_pipeline_job`) returns the
+   run's rows to pending. **No automatic retry**: it would fail fast on a suspended `CDC_WH` and add
+   a resume outside the window. Residual case, documented: an `UPDATE` committed with no run ever
+   created.
+5. **Owner condition — the worst-wait property must exercise empty guard queries mid-burst.**
+   Confirmed and asserted: the 2,000-world corpus produces **1,675 empty mid-burst guard queries,
+   1,191 of them followed by a run that finds rows**. An explicit test covers the case: burst
+   arriving, empty guard query, clock restarted, next guard after *N* finds rows.
+6. **Agent Assignment deviation**: Claude Code builds 10–13 (owner decision); human review in the PR.
+
+The fallback text for EXECUTE TASK is renumbered **1.5**.
+
+### Docs and versions checked
+
+- `dagster/Dockerfile` pins `dagster==1.6.*`. I read the **1.6.14** wheel source (downloaded to
+  the scratchpad, never imported):
+  - `run_failure_sensor(monitored_jobs=…, default_status=…)` exists;
+  - run-status sensor functions accept resource parameters (`get_resource_args`);
+  - `RunFailureSensorContext.dagster_run` is available;
+  - `RUN_KEY_TAG = "dagster/run_key"`;
+  - `AssetExecutionContext.run_tags` exists.
+- Snowflake connector default paramstyle is `pyformat`, so `%(run_key)s` works. An explicit
+  `BEGIN … COMMIT` works with autocommit on.
+
+### Files
+
+| # | File | Notes |
+|---|------|-------|
+| 10 | `dagster/pipeline/gate.py` (new) | `GateState`, `decide`, `after_query` (1.4 fix); `to_cursor` / `from_cursor` with **v5 cursor migration** (`hot h` → pending, `quiet = 3 − h`); `new_run_key`; `consume_pending` (`BEGIN` → mark → read marked → `COMMIT`, `ROLLBACK` on error); `release_pending`. **No Dagster import**, so it can be tested in CI |
+| 11 | `dagster/pipeline/sensors.py` | v6 header. The bronze sensor uses the gate. `BATCH_WINDOW_MINUTES` comes from the environment (default 0 = profile A). The run key is the Dagster `run_key` and is tagged with the window. **The false "implicit PRIMARY KEY" comment is gone** (the v5 code marked `WHERE consumed = FALSE`). New `pending_run_release_sensor` with no `RunRequest`. Docstrings now point to `terraform/pipeline/gate.tf` instead of the deleted script (part of O23) |
+| 12 | `dagster/pipeline/assets.py` | `run_key = context.run_tags.get("dagster/run_key")` → `PROCESSING_LOG.RUN_KEY` (14 placeholders). `None` for manual runs |
+| 12 | `dagster/pipeline/__init__.py` | Registers `pending_run_release_sensor`. **Deviation**: this file is in no ownership row; one line, needed for the sensor to exist |
+| 13 | `tests/unit/test_gate.py` (new) | 27 tests, listed below |
+
+What `test_gate.py` covers:
+- **Profile A:** legacy parity with the v5 logic on **500 random sequences**, with random `found`.
+- **Profile B:**
+  - a settled burst runs once (`[7]`);
+  - the cluster `0/2/4/10/12` runs at `[7, 17]`;
+  - continuous traffic gives a guard every 10 min, and at the end `60/70/71`, which is the
+    "at most two" of Decision 6;
+  - an empty settled query gets its retry, then the burst clears;
+  - at most two consecutive queries.
+- **Regression:** the 1.3 `after_query` gives 50 queries per hour; the fix gives `[10…50]`.
+- **Explicit case** of an empty guard query mid-burst.
+- **Property on 2,000 worlds** (bursty activity, task row probability 1.0–0.05, lag 0–2 min):
+  - no stranded row;
+  - **worst wait 10 min = *N***; p95 9 min over 73,648 rows;
+  - never more than 2 queries in consecutive minutes;
+  - the corpus contains ≥ 100 empty mid-burst guards and ≥ 50 later finds.
+- **Cursor:** round trip; empty cursor (profile A queries at once, B at settle); v5 migration
+  with `hot` 0–3 keeps v5 behaviour; migration into profile B.
+- **PENDING_RUNS** (SQLite behind a pyformat adapter):
+  - UPDATE-first marks then reads exactly the marked rows;
+  - **race: a row inserted after the `UPDATE` stays pending and is consumed next time**;
+  - the v5 order is shown losing that trigger;
+  - a failed read rolls back the marks;
+  - **a failed run's rows are released and re-consumed under the next key**, other runs' rows
+    untouched, an unknown key releases 0.
+- **Static wiring:** sensor, release sensor (no retry), `assets.py` insert.
+
+### Mutation check
+
+Restoring the 1.3 `after_query` makes **4 tests fail**:
+- the at-most-two test;
+- the fixed regression;
+- the explicit empty-guard test;
+- the 2,000-world property, through its query-rate assertion.
+
+The worst-wait bound **alone did not catch the bug**: extra queries do not lengthen waits. That is
+why the property now also asserts the query rate.
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `ruff check .` | ✅ |
+| `pytest tests/unit -q` | ✅ 157 passed (27 in `test_gate.py`) |
+| `python -m py_compile dagster/pipeline/*.py` | ✅ |
+| `terraform fmt -check`, `validate` | ✅ (only a comment changed in `grants.tf`) |
+| Dagster load of the code location | ⏭️ Not run locally (no Dagster on the host); first stack start |
+
+### Deviations from DESIGN 1.4
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| `gate.py` also holds the PENDING_RUNS DB-API helpers | Keeps the SQL testable without Dagster | — |
+| `__init__.py` edited (not in the ownership table) | Registering the new sensor | One line |
+| Profile B's first tick on an empty cursor queries at settle (3 min), not at once | Pattern 4 semantics; rows written before the sensor started are still consumed | +3 min once, after a Dagster restart in profile B |
+| REQ-11 (COULD) not built | Day 6 slack only; disabled during the A/B anyway | — |
+
+### Open issues (new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O30 | `BATCH_WINDOW_MINUTES` is not in `.env.example` yet (item 21, shared file) and must switch with `cost_profile` (Decision 2) | Item 21 / before Day 7 | Christian |
+| O31 | The code location has not been loaded by a real Dagster 1.6 yet: `run_failure_sensor` with a resource parameter, `context.run_tags` on the asset | First stack start | build-agent |
+| O32 | In profile B the switch at 00:00 UTC restarts Dagster. A pending burst survives (cursor), but a cursor written by profile A has `last_run_at` from A, which can hold B's first run up to *N* | Dry run (Day 7) | Christian |
+| O33 | Residual case of Decision 7 (`UPDATE` committed, run never created) shows as a freshness gap. Count them in the dry run | Day 7 | Christian |
+| O34 | Merge order: #4 first **without** `--delete-branch`, then `gh pr edit <this PR> --base main`, then delete #4's branch (lesson from #1/#2) | Merge | Christian |
+
+---
+
 ## Next Step
 
-Owner reviews the PR for items 16–18, then runs the bootstrap (`docs/runbooks/terraform-state-bootstrap.md`,
-`scripts/00_terraform_bootstrap.sql`) and the pre-apply checklist (credit price, probe P1, owner user,
-secrets) before the Day 3 apply. Next build: `/sdd-build COST_GOVERNANCE items 10-14` (Python), then
-19–22 (owner-authored docs; item 21 shared files).
+Owner reviews PR #4 (items 16–18) and the stacked PR for items 10–13; bootstrap before merging #4
+(O24). Next build: `/sdd-build COST_GOVERNANCE item 14` (load generator, identity `CDC_ROLE_RO`,
+task-state check that fails if it cannot see the 10 tasks). Then items 19–22 (owner-authored).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
