@@ -60,14 +60,14 @@ query acceleration enabled, and `COMPUTE_WH` had a 300-second auto-suspend; no r
 
 | ID | Requirement | Priority | Verified by |
 |----|-------------|----------|-------------|
-| REQ-01 | Terraform defines the v3 database, schemas, warehouse, roles, grants and resource monitors. Nothing in v3 is created by hand. | MUST | AT-001 |
+| REQ-01 | Terraform defines the v3 database, schemas, warehouse, roles, grants and resource monitors. Nothing in v3 is created by hand, except the documented one-time bootstrap of Terraform's own identity; steps the provider cannot express run as versioned SQL in CI and are listed in the README. | MUST | AT-001 |
 | REQ-02 | Warehouse settings that drive cost are set explicitly in code, never left to platform defaults: generation via `GENERATION = '1'` (the account rejects `RESOURCE_CONSTRAINT = STANDARD_GEN_1` for this), and `ENABLE_QUERY_ACCELERATION = FALSE`. | MUST | AT-002 |
 | REQ-03 | A resource monitor at **account** level exists in addition to the per-warehouse monitor on the v3 warehouse, each with notify and suspend thresholds. | MUST | AT-003 |
 | REQ-04 | The ten gate tasks run as **serverless** tasks (no `WAREHOUSE`), keeping the `SYSTEM$STREAM_HAS_DATA` condition and the `SP_GATE_DOMAIN` semantics of ADR-0019. | MUST | AT-004 |
 | REQ-05 | The Dagster sensor enforces a minimum interval *N* between `cdc_pipeline_job` runs (env var, default 10 min). Pending rows accumulate and are consumed by the next run — none are lost. | MUST | AT-005, AT-006 |
 | REQ-06 | A deterministic load generator (seeded, fixed burst size and cadence) drives the source database for measurement. | MUST | AT-007 |
 | REQ-07 | A written measurement protocol runs config **A** (v2 settings: Gen2, tasks on the warehouse, no window) and config **B** (v3 settings) under the same load, each for ≥ 48 h, plus a ≥ 6 h no-load window in config B for the idle criterion, and records credits, resumes and freshness from the views named in *Success Criteria*. | MUST | AT-008 |
-| REQ-08 | CI runs `terraform fmt -check`, `validate` and `plan` on every PR; `apply` runs only on `main`, through a protected environment with a required reviewer. | MUST | AT-009 |
+| REQ-08 | CI runs `terraform fmt -check` and `validate` on every PR, and `plan` on every PR from this repository (fork PRs get no credentials; the `pipeline` root's plan is skipped with a notice until the Bronze tables exist); `apply` runs only on `main`, through a protected environment with a required reviewer. | MUST | AT-009 |
 | REQ-09 | The README *What it actually costs* section is rewritten with the measured A/B numbers and the exact queries that produced them. | MUST | AT-010 |
 | REQ-10 | Runbooks: "Kafka connector is down" and "a resource monitor suspended the warehouse". | SHOULD | AT-011 |
 | REQ-11 | `cdc_pipeline_job` selects only the dbt models downstream of the domains in the sensor's `domains` tag. | COULD | AT-012 |
@@ -100,7 +100,7 @@ its method. The README states the number we got, not the number we hoped for.
 | AT-001 | Reproducible infra | Empty v3 namespace on the account | CI applies `main` | All v3 objects exist; a second `plan` shows no changes |
 | AT-002 | Cost settings pinned | Warehouse applied, profile `optimized` | `SHOW WAREHOUSES LIKE '<var.warehouse_name>'` (default `CDC_WH`) | `generation` = 1, `resource_constraint` = `STANDARD_GEN_1`, `enable_query_acceleration` = false |
 | AT-003 | Account cap | Monitors applied | `SHOW RESOURCE MONITORS` | One account-level and one v3-warehouse monitor, thresholds as in Terraform |
-| AT-004 | Serverless gate | Tasks applied, no traffic | `SHOW TASKS IN SCHEMA` + 1 h idle | Tasks have no warehouse; `SERVERLESS_TASK_HISTORY` shows no billable runs while streams are empty |
+| AT-004 | Serverless gate | Tasks applied, no traffic | `SHOW TASKS IN SCHEMA` + 1 h idle | Tasks have no warehouse; no task run executes its body while streams are empty (`TASK_HISTORY` shows only skipped evaluations); any nominal charge for false `WHEN` evaluations is reported, not counted as a failure |
 | AT-005 | Batching window | A burst every 2 min for 30 min | Sensor runs | `cdc_pipeline_job` runs ≤ ⌈30/N⌉ + 1 times |
 | AT-006 | No lost domain | Low-volume domain lands between two runs inside the window | Next run fires | That domain's rows reach Silver; `PENDING_RUNS` has no row left `consumed = FALSE` older than *N* + 2 min |
 | AT-007 | Deterministic load | Same seed twice | Generator runs | Identical row counts per table and per minute |
@@ -121,7 +121,9 @@ its method. The README states the number we got, not the number we hoped for.
 | `dagster/pipeline/sensors.py`, `jobs.py` | Owns |
 | `tests/load/`, `docs/measurement/` | Owns |
 | `docs/runbooks/connector-down.md`, `monitor-suspended.md` | Owns |
-| `dbt/dbt_project.yml`, `.github/workflows/*.yml`, `README.md`, `CLAUDE.md`, `docs/adr/` | Shared — serialize |
+| `.github/workflows/terraform.yml` (new), `deploy.yml` (delete) | Owns |
+| `.github/workflows/ci.yml`, `README.md`, `CLAUDE.md`, `docs/adr/` | Shared — serialize |
+| `dbt/**` (incl. `dbt_project.yml`) | Reads — no dbt change (DESIGN Decision 3) |
 | `dbt/models/**` | Reads (REQ-11 selection only) |
 
 ## Build Skills / Context
@@ -179,7 +181,7 @@ its method. The README states the number we got, not the number we hoped for.
 | Users | 2 | Future client is generic until a contract exists |
 | Goals | 3 | Prioritized, each traceable to REQs |
 | Success | 3 | Numbers, sources and method named; hypotheses explicitly falsifiable |
-| Scope | 2 | Depends on the provider's support (A-002) and the monitor values (open question 1) |
+| Scope | 2 | Depends on the provider's support for budgets and account-level monitors (A-002); open question 1 resolved |
 | **Total** | **13/15** | |
 
 ---
@@ -204,10 +206,11 @@ its method. The README states the number we got, not the number we hoped for.
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
 | 1.1 | 2026-11-17 | Christian (with Claude) | New trial account `GWHUBCF-QQ53235`: open question 1 resolved as moot; REQ-02/AT-002 use `GENERATION = '1'` and pin query acceleration off; A-001 validated; A-002 risk raised; A-006 and trial constraint added |
 | 1.2 | 2026-11-17 | Christian | Approved. Scope frozen. |
+| 1.4 | 2026-11-17 | Christian (pending OK) | Wording aligned with justified exceptions from the second design review, no scope change: REQ-01 names the bootstrap exception and the CI SQL steps; REQ-08 states the fork and pipeline-skip cases; AT-004 accounts for the nominal `WHEN` charge; workflow ownership aligned with the DESIGN; clarity note and next step updated. |
 | 1.3 | 2026-11-17 | Christian | From the design review, no scope change: AT-002 refers to the configurable warehouse name and is checked in profile `optimized`; idle window added to REQ-07; measurement cap 25 credits; query acceleration off in both configs (documented deviation from v2); open questions 2–6 resolved. |
 
 ---
 
 ## Next Step
 
-**Ready for:** `/design .claude/sdd/features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md` — after approval.
+**In Design:** see `DESIGN_COST_GOVERNANCE.md`.
