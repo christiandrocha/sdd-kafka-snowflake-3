@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–13 and 16–18 built (15: `queries.sql` draft only); 14, 15, 19–22 pending |
+| **Status** | In Progress — items 1–14 and 16–18 built (15: `queries.sql` draft only); 15, 19–22 pending (owner-authored / shared) |
 
 ---
 
@@ -525,9 +525,106 @@ why the property now also asserts the query rate.
 
 ---
 
+## Run 6 — 2026-11-18 — manifest item 14
+
+Branch `feat/cost-governance-item-14`, **stacked on `feat/cost-governance-items-10-13`** (PR #5,
+itself on #4). Requirement: **REQ-06 / AT-007**, plus the Decision 5 task-state validity rule.
+DESIGN 1.4, no revision in this run.
+
+### Owner decisions (2026-11-18)
+
+1. A burst more than 60 s late is **skipped and recorded**, never run late. The count appears in
+   `--plan-only` ("would skip N") and in the final summary.
+2. A gate task not `started` → warning, the load continues, and `task_states.csv` gets a
+   **`window_valid`** column.
+3. Identity of the task check: **`CDC_ROLE_RO`**. The check **fails if it does not see exactly the
+   10 tasks**; it never returns empty.
+4. Tests for an update that affects 0 rows (warning when a burst affects fewer than
+   `LOAD_ROWS_PER_BURST`) and for **resume after a crash between commit and CSV write**, with the
+   behaviour documented.
+5. Prerequisites (O35) stay with the owner.
+
+### Behaviour, as documented in the module docstring
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Same `LOAD_SEED` | Identical schedule **and** identical operations (table, kind, key, values). Each burst has its own RNG seeded by `(seed, burst_id)`, so a restart reproduces a burst without history (AT-007) |
+| Burst > 60 s late | Not run; line in `skipped.csv` + stderr; `skipped=N` in the summary; exit code 1 |
+| Update target missing (its burst was skipped) | Updates affect 0 rows; `commits.csv.rows` = rows **actually** affected; stderr warning "affected X < 200 planned rows"; `underfilled` in the summary |
+| **Crash between Postgres COMMIT and the CSV append** | On restart, every past burst missing from `commits.csv` is probed by the deterministic key of its first `orders` insert. If present, the burst is logged with `source=recovered`; `committed_at_utc` comes from that row's `dt_current_timestamp`, the transaction start, ms before commit; `rows` is the planned count. **Never re-executed**: replayed updates would emit duplicate CDC events. Inserts are `ON CONFLICT DO NOTHING` as a second guard |
+| Burst fails mid-transaction | ROLLBACK; no CSV line; the error propagates and the process stops. A restart re-runs it if still within 60 s, otherwise it is skipped |
+| Task check sees ≠ 10 gate tasks (0, 9, 11) | `TaskVisibilityError`; exit code 3. Checked at start-up, so a misconfiguration fails before the first burst |
+| A gate task not `started` | stderr warning; `window_valid=false` from that check on (cumulative, survives restarts); the load continues; exit code 1 at the end |
+
+### Files
+
+| File | Notes |
+|------|-------|
+| `tests/load/generate_load.py` (new) | Pure parts: `schedule` (clusters at :30 UTC, every 120 min, offsets `0,2,4,10,12`, validated so no cluster crosses a day or the next cluster); `allocate` (largest remainder over fixed weights; 200 = the weights); `plan_burst` / `plan_window` (facts insert-only; entities about half updates against earlier bursts' deterministic UUID5 keys; synthetic values); `sql_for` (parameterised; `%s::jsonb` for `payment_events.event`); `due_action`. I/O: `run_burst` (one transaction), `committed_at_of` (recovery probe), `CsvLog` (append + fsync), `TaskStateLog`, `parse_task_states`, `snowflake_task_rows` (CDC_ROLE_RO, key-pair from file, **no warehouse set**, DictCursor), `run` (injectable clock / sleep / stderr), `plan_report`, `main` (`--plan-only`, `--no-task-check` for local testing only). `psycopg2`, `snowflake.connector` and `cryptography` are imported lazily |
+| `tests/unit/test_generate_load.py` (new) | 28 tests, listed below |
+
+What `test_generate_load.py` covers:
+- **Schedule:** 24 clusters × 5 bursts in window A, at :30 of even hours; no day crossing;
+  bad offsets rejected; `allocate` sums.
+- **AT-007:** same seed → identical; another seed → same schedule, different operations;
+  200 rows per burst; restart reproduces a burst.
+- **Content:**
+  - facts are insert-only, and updates target only earlier inserts;
+  - the probe key is the first `orders` insert;
+  - the data is synthetic;
+  - the SQL is parameterised, and inserts never overwrite.
+- **Time:** wait / run / skip at 60 s; `plan_report` counts would-be skips (7 at 02:33:30).
+- **Task check:** exactly ten accepted; empty / 9 / 11 rejected; `window_valid` turns false and
+  stays false across restarts.
+- **Run loop with fakes:**
+  - 5 bursts → 5 commits, live rows, 2 task checks;
+  - **an update affecting 0 rows → real counts and 4 warnings**;
+  - **late bursts → 3 skipped, 2 run**;
+  - **crash between commit and CSV → `recovered`, timestamp from Postgres, b1 never re-executed**;
+  - an uncommitted burst is re-run;
+  - a failed burst rolls back with no line;
+  - **no visibility → stops before any burst**;
+  - not-started → continues, `window_valid=false`;
+  - `--plan-only` touches no database.
+
+### Mutation checks
+
+- Disabling recovery fails the crash-resume test.
+- Not turning `window_valid` false fails 2 tests.
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `ruff check .` | ✅ |
+| `pytest tests/unit -q` | ✅ 185 passed (28 in `test_generate_load.py`) |
+| `generate_load.py --window dry-run --start 2026-11-24T12:00Z --end 2026-11-24T18:00Z --plan-only` | ✅ `clusters=3 bursts=15 rows=3000`; inserts/updates per table; `would skip 0` |
+| Against Postgres / Snowflake | ⏭️ Not run (stack and identities not up; R1 — agents do not touch the account) |
+
+### Deviations from DESIGN 1.4
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| `commits.csv` gains a 4th column `source` (`live` \| `recovered`) | Recovered bursts must be distinguishable; their `committed_at_utc` is the transaction start | `queries.sql` Q6 reads the first three columns, unchanged |
+| New `skipped.csv` | Owner decision 1 | — |
+| Task check at start-up **and** 20 min after each cluster's first burst (DESIGN: "after each load cluster") | Fail before the first burst on misconfiguration; 20 min = after the last burst (+12) and its gate-task tick | — |
+| Exit codes 0 / 1 / 3 | 1 = window not valid (skips or a task not started), 3 = visibility error | Usable by `make load` (item 20) |
+
+### Open issues (new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O35 | Prerequisites: `CURSOR_MCP_USER` key pair (public key in `TF_VAR_cursor_rsa_public_key`, O4); `LOAD_SNOWFLAKE_PRIVATE_KEY_PATH`; the machine/VM for Days 7–12 with `psycopg2-binary`, `snowflake-connector-python`, `cryptography` | Before Day 7 | Christian |
+| O36 | `CURSOR_MCP_USER` has `DEFAULT_WAREHOUSE = CDC_WH` (`users.tf`). The generator sends only `SHOW TASKS`, which needs no warehouse and does not resume one. **Verify in the dry run** that `WAREHOUSE_EVENTS_HISTORY` shows no `CDC_WH` resume caused by this user. If it does, set its default warehouse to `CDC_CI_WH` by PR | Day 7 | build-agent |
+| O37 | The generator updates `restaurants` (≈ 21 updates per cluster): SCD2_RESTAURANTS reads `tests/load/` (`_index` ownership). Its history model will see these versions; coordinate fixture vs measurement load at its Design | SCD2 Design (Day 3) | Christian |
+| O38 | Dependency versions on the VM are not pinned by this repo (no `requirements` for `tests/load/`) | Before Day 7 | Christian |
+
+---
+
 ## Next Step
 
-Owner reviews PR #4 (items 16–18) and the stacked PR for items 10–13; bootstrap before merging #4
-(O24). Next build: `/sdd-build COST_GOVERNANCE item 14` (load generator, identity `CDC_ROLE_RO`,
-task-state check that fails if it cannot see the 10 tasks). Then items 19–22 (owner-authored).
+Builder-owned manifest items are all built (1–14, 16–18). Remaining: 15 (PROTOCOL, ATTRIBUTION,
+RESULTS_TEMPLATE, finish `queries.sql`), 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
+`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the owner
+wants it. Merge order #4 → #5 → #6 (O34). Day 3: bootstrap and first apply.
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
