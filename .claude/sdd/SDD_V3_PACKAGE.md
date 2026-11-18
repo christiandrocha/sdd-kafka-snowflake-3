@@ -47,9 +47,9 @@ v2 stays frozen as the baseline the measurements compare against.
 3. `.claude/sdd/_index.md` — active features, file ownership, plan.
 4. The folder of the feature you are working on, and the ADRs it references.
 
-Each SDD phase has a Cursor command in `.cursor/commands/` (`/sdd-status`, `/sdd-define`,
+Each SDD phase has a Cursor skill in `.cursor/skills/` (invoked only explicitly) (`/sdd-status`, `/sdd-define`,
 `/sdd-design`, `/sdd-review`, `/sdd-build`, `/sdd-validate`, `/sdd-ship`, `/sdd-retro`,
-`/sdd-fasttrack`). When the user runs one, follow that file exactly; it overrides general habits.
+`/sdd-fasttrack`). When the user runs one, follow its `SKILL.md` exactly; it overrides general habits.
 `/sdd-review` and `/sdd-validate` must run in a chat that has not worked on the feature.
 
 **Do not read `.claude/sdd/SDD_V3_PACKAGE.md`.** It is a generated, read-only copy for
@@ -93,7 +93,7 @@ is the rules that hold in every phase; `_index.md` is the live status.
 
 #### Lifecycle
 
-| # | Phase | Cursor command | Chat | Artifact (in `features/<FEATURE>/`) | Exit gate |
+| # | Phase | Cursor skill (`/name`) | Chat | Artifact (in `features/<FEATURE>/`) | Exit gate |
 |---|-------|----------------|------|-------------------------------------|-----------|
 | 0 | Brainstorm | `/sdd-brainstorm <FEATURE> <idea>` | any | `BRAINSTORM_<FEATURE>.md` (in `backlog/`) | A direction is chosen. *Optional for small features.* |
 | 1 | Define | `/sdd-define <FEATURE>` | any | `DEFINE_<FEATURE>.md` | Approved by the owner. Clarity ≥ 12/15. **Scope freezes here.** |
@@ -106,8 +106,9 @@ is the rules that hold in every phase; `_index.md` is the live status.
 | — | Fast track | `/sdd-fasttrack <FT-id>` | any | row in `_index.md` | One acceptance test with evidence. |
 | — | Status | `/sdd-status` | any | — (read-only) | — |
 
-The commands live in `.cursor/commands/` and are the executable form of this table: if the process
-changes, the command file changes in the same PR (the Retro checks it).
+The skills live in `.cursor/skills/<name>/SKILL.md` with `disable-model-invocation: true`, so the agent
+never starts a phase on its own. They are the executable form of this table: if the process changes,
+the skill changes in the same PR (the Retro checks it).
 
 Templates live in `templates/`. Brainstorms not yet promoted live in `backlog/`.
 
@@ -240,7 +241,7 @@ runbooks, README with *What it actually costs*.
 | `.github/workflows/ci.yml` | Shared — serialize | — | FT-03 |
 | `Makefile`, `.env.example` | Shared — serialize | — | FT-02 (`make demo`) |
 | `README.md`, `CLAUDE.md`, `docs/adr/` | Shared — serialize | Shared — serialize | FT-02, FT-04 |
-| `.cursor/commands/`, `.claude/sdd/templates/`, `.claude/sdd/README.md`, `CONSTITUTION.md` | Process files — changed only by a Retro or an explicit process PR | | |
+| `.cursor/skills/`, `.claude/sdd/templates/`, `.claude/sdd/README.md`, `CONSTITUTION.md` | Process files — changed only by a Retro or an explicit process PR | | |
 
 The two features share no owned path. They can be built in parallel; shared files are touched
 one PR at a time.
