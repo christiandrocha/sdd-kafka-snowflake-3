@@ -9,7 +9,7 @@
 -- ("metade dos 20 domínios nunca alimenta nenhum modelo Silver ou Gold,
 -- sendo volume pago e processado sem consumo analítico real").
 --
--- Os 10 aqui batem 1:1 com os 10 Streams/Tasks de scripts/streams_and_tasks.sql.
+-- Os 10 aqui batem 1:1 com os 10 Streams/Tasks de terraform/pipeline/gate.tf (var.gate_domains).
 --
 -- Ausência de FK entre tabelas é deliberada e vem do projeto anterior: com
 -- CDC por tabela, a ordem de chegada dos eventos não respeita integridade

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 PLATFORM = ROOT / "terraform" / "platform"
 
-CI_SCRIPTS = ["seed_config.sql", "account_monitor.sql", "budget.sql"]
+CI_SCRIPTS = ["seed_config.sql", "account_monitor.sql", "budget.sql", "verify_governance.sql"]
 
 # DESIGN Pattern 3 / ADR-0022: the ten Tier-1 domains.
 TIER1 = {
@@ -139,3 +139,35 @@ def test_snowflake_application_grants_precede_the_action():
     grant = sql.index("GRANT USAGE ON PROCEDURE CDC_POC.CONFIG.SP_SUSPEND_GATE_TASKS()")
     assert grant < sql.index("ADD_CUSTOM_ACTION(")
     assert "TO APPLICATION SNOWFLAKE" in sql[grant : grant + 200]
+
+
+def test_verify_runs_read_only_as_the_plan_role():
+    sql = _sql("verify_governance.sql")
+    assert re.findall(r"USE\s+ROLE\s+(\w+)", sql, re.I) == [_tf_default("plan_role_name")]
+    assert set(re.findall(r"<%\s*(\w+)\s*%>", sql)) == {
+        "cost_profile",
+        "gate_task_timeout_ms",
+        "check_pipeline",
+    }
+    for statement in ["GRANT", "ALTER", "CREATE", "INSERT", "MERGE", "CALL CDC_POC.CONFIG.SP_"]:
+        assert statement not in sql.upper().replace("CALL CDC_POC.CONFIG.CDC_BUDGET!", ""), (
+            statement
+        )
+
+
+def test_verify_raises_on_every_acceptance_check():
+    sql = _sql("verify_governance.sql")
+    for code in ["-20002", "-20003", "-20004", "-20005"]:
+        assert f"EXCEPTION ({code}," in sql, code
+    assert sql.count("RAISE ") >= 5
+    # B4: AT-002 in the F6 read-back format.
+    assert "\"resource_constraint\" = 'STANDARD_GEN_' || :gen" in sql
+    assert 'TO_VARCHAR("generation") = :gen' in sql
+
+
+def test_budget_grants_viewer_to_the_plan_role():
+    assert (
+        "GRANT SNOWFLAKE.CORE.BUDGET ROLE CDC_POC.CONFIG.CDC_BUDGET!VIEWER"
+        " TO ROLE TERRAFORM_PLAN_ROLE;"
+        in _sql("budget.sql")
+    )

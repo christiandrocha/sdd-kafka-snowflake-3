@@ -1,217 +1,182 @@
--- ──────────────────────────────────────────────────────────────────────────
--- verify_governance.sql
--- Roda ANTES de qualquer demo/execução ao vivo para o cliente.
+-- ------------------------------------------------------------------------
+-- verify_governance.sql — account checks for AT-002, AT-003 and AT-004
+-- (COST_GOVERNANCE manifest item 9; Build checklist B1, B4).
 --
--- Resolve a discrepância encontrada durante esta análise: CLAUDE.md descreve
--- um Resource Monitor "cdc_trial_monitor" (348 créditos, FREQUENCY=NEVER,
--- aplicado via ALTER ACCOUNT), enquanto scripts/snowflake_setup.sql cria um
--- Resource Monitor diferente "cdc_poc_monitor" (20 créditos, MONTHLY,
--- aplicado via ALTER WAREHOUSE CDC_WH).
+-- ASSERTIVE: each check is a Snowflake Scripting block that RAISES on a
+-- mismatch, so CI fails instead of printing a result nobody reads. v2's
+-- version of this file documented the trap it fell into: SHOW returns zero
+-- rows, without error, for objects the active role cannot see. Here "not
+-- found" is a failure, never a pass.
 --
--- Hipótese mais provável (não confirmada — rode este script para confirmar):
--- são dois monitores diferentes, coexistindo, com propósitos diferentes:
---   - cdc_trial_monitor: teto único da conta trial inteira (ALTER ACCOUNT),
---     provavelmente ligado ao período de trial de 30 dias mencionado em
---     docs/TRIAL_PLAN.md (arquivo ausente do repositório atual).
---   - cdc_poc_monitor: guarda-corpo específico do warehouse CDC_WH,
---     recriável via snowflake_setup.sql, é o que está sob controle deste
---     projeto.
--- Se SÓ o cdc_poc_monitor existir, a hipótese acima está errada e o
--- CLAUDE.md está descrevendo algo que nunca existiu ou já foi removido.
+-- READ-ONLY: runs as TERRAFORM_PLAN_ROLE on CDC_CI_WH (never CDC_WH, never
+-- ACCOUNTADMIN). Visibility comes from terraform/platform (MONITOR on both
+-- warehouses, both monitors and future tasks; USAGE on the database, schemas
+-- and CDC_CI_WH), terraform/pipeline (MONITOR on each gate task) and
+-- scripts/budget.sql (the budget's VIEWER instance role).
 --
--- ── PRIVILÉGIO NECESSÁRIO — LEIA ANTES DE RODAR ───────────────────────────
---
--- Este script EXIGE ACCOUNTADMIN. Não é preferência: os passos 1, 2 e 4
--- consultam objetos de conta, e nenhuma das identidades de serviço do
--- projeto alcança isso. Verificado em 2026-08-10 com DAGSTER_SERVICE_USER:
---
---     USE ROLE ACCOUNTADMIN
---       -> "Requested role 'ACCOUNTADMIN' is not assigned to the executing
---           user."
---
--- As três identidades de keys/ (DAGSTER_SERVICE_USER e DATA_AGENTS_MCP_USER
--- em CDC_ROLE, CURSOR_MCP_USER em CDC_ROLE_RO) têm um papel só cada uma.
--- Rode este arquivo numa worksheet do Snowflake com ACCOUNTADMIN.
---
--- ── A ARMADILHA DOS PASSOS 1 E 2 ──────────────────────────────────────────
---
--- `SHOW RESOURCE MONITORS` e `SHOW PARAMETERS ... IN ACCOUNT` filtram pelo
--- que o papel ATIVO enxerga. Sob um papel sem MONITOR USAGE na conta, os dois
--- retornam ZERO LINHAS SEM ERRO -- resultado indistinguível de "não existe
--- monitor nenhum".
---
--- Foi exatamente o que aconteceu na execução parcial de 2026-08-10 sob
--- CDC_ROLE: passos 1 e 2 vazios, passo 4 negado ("Schema
--- 'SNOWFLAKE.ACCOUNT_USAGE' does not exist or not authorized"). Zero linhas
--- ali NÃO responde a pergunta que este script existe para responder. Só
--- confie no resultado dos passos 1 e 2 se `SELECT CURRENT_ROLE()` devolver
--- ACCOUNTADMIN.
---
--- O que a execução parcial ESTABELECEU: o CDC_WH não tem monitor vinculado no
--- nível do warehouse -- o campo `resource_monitor` vem nulo, e esse campo o
--- CDC_ROLE enxerga. Logo, se existe proteção, ela está no nível da conta.
--- ──────────────────────────────────────────────────────────────────────────
+-- RUN BY: CI after every apply on `main`, and after every profile switch —
+-- a switch that applied only one root voids the window (B1):
+--   snow sql -f scripts/verify_governance.sql \
+--     -D "cost_profile=optimized" -D "gate_task_timeout_ms=10000" -D "check_pipeline=true"
+-- cost_profile and gate_task_timeout_ms must be the values in
+-- terraform/env/dev.tfvars; check_pipeline=false until the first pipeline
+-- apply (Bronze tables exist only after the connector's first write, F5).
+-- ------------------------------------------------------------------------
 
-USE ROLE ACCOUNTADMIN;
+USE ROLE TERRAFORM_PLAN_ROLE;
+USE WAREHOUSE CDC_CI_WH;
 
--- 0. Confirma o papel ativo. Se isto não devolver ACCOUNTADMIN, pare: os
---    passos 1, 2 e 4 vão mentir por omissão em vez de dar erro.
-SELECT CURRENT_ROLE() AS papel_ativo, CURRENT_ACCOUNT() AS conta;
-
--- 1. Lista TODOS os resource monitors da conta — não assuma que só existe um.
-SHOW RESOURCE MONITORS;
-
--- 2. Configuração default da conta (se ALTER ACCOUNT SET RESOURCE_MONITOR
---    foi realmente executado em algum momento, aparece aqui).
-SHOW PARAMETERS LIKE 'RESOURCE_MONITOR' IN ACCOUNT;
-
--- 3. Qual monitor está de fato vinculado ao warehouse usado pelo pipeline,
---    e em que estado ele está agora. O SHOW devolve ~35 colunas; o
---    RESULT_SCAN logo abaixo projeta só as que interessam, já tipadas.
---
---    O RESULT_SCAN(LAST_QUERY_ID()) precisa vir IMEDIATAMENTE depois do SHOW,
---    na mesma sessão -- qualquer query entre os dois quebra a referência.
+-- AT-002 / REQ-02 — warehouse cost settings (F6 read-back format, B4) ---------
+-- Expected in profile optimized: generation = 1, resource_constraint =
+-- STANDARD_GEN_1 (rejected on write, reported on read — F6). In baseline,
+-- generation = 2; resource_constraint = STANDARD_GEN_2 is assumed by symmetry
+-- and confirmed in the dry run (BUILD_REPORT run 3).
 SHOW WAREHOUSES LIKE 'CDC_WH';
-
-SELECT
-    "name"              AS warehouse,
-    "size"              AS tamanho,
-    "state"             AS estado,
-    "auto_suspend"      AS auto_suspend_s,
-    "auto_resume"       AS auto_resume,
-    "resource_monitor"  AS monitor_do_warehouse
+SELECT "name", "size", "generation", "resource_constraint", "enable_query_acceleration",
+       "auto_suspend", "auto_resume", "resource_monitor"
 FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 
--- 4. Consumo real dos últimos 30 dias — a fonte de verdade sobre se o
---    projeto está queimando crédito mesmo parado (não deveria, se está
---    desligado, mas confirme).
-SELECT
-    warehouse_name,
-    DATE_TRUNC('day', start_time) AS day,
-    SUM(credits_used)             AS credits_used
-FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
-WHERE warehouse_name = 'CDC_WH'
-  AND start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-GROUP BY 1, 2
-ORDER BY 2 DESC;
+EXECUTE IMMEDIATE $$
+DECLARE
+    profile VARCHAR DEFAULT '<% cost_profile %>';
+    gen VARCHAR;
+    found INTEGER DEFAULT 0;
+    ok INTEGER DEFAULT 0;
+    bad_profile EXCEPTION (-20001, 'cost_profile must be baseline or optimized');
+    at002_failed EXCEPTION (-20002, 'AT-002 failed: CDC_WH settings differ from the cost profile (see SHOW WAREHOUSES above)');
+BEGIN
+    IF (profile NOT IN ('baseline', 'optimized')) THEN
+        RAISE bad_profile;
+    END IF;
+    gen := IFF(profile = 'optimized', '1', '2');
+    SHOW WAREHOUSES LIKE 'CDC_WH';
+    SELECT COUNT(*),
+           COUNT_IF(TO_VARCHAR("generation") = :gen
+                AND "resource_constraint" = 'STANDARD_GEN_' || :gen
+                AND LOWER(TO_VARCHAR("enable_query_acceleration")) = 'false'
+                AND "auto_suspend" = 60
+                AND LOWER(TO_VARCHAR("auto_resume")) = 'true'
+                AND UPPER(REPLACE("size", '-', '')) = 'XSMALL'
+                AND "resource_monitor" = 'CDC_WH_MONITOR')
+      INTO :found, :ok
+      FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+    IF (found <> 1 OR ok <> 1) THEN
+        RAISE at002_failed;
+    END IF;
+    RETURN 'AT-002 OK: CDC_WH generation ' || gen || ', QA off, XSMALL, 60 s, CDC_WH_MONITOR';
+END;
+$$;
 
--- 5. Consumo por hora do dia corrente, para o caso de o passo 4 estar
---    defasado. ACCOUNT_USAGE tem latência de até 3 horas; esta função de
---    INFORMATION_SCHEMA é quase em tempo real e roda com privilégio menor,
---    então serve de conferência cruzada do passo 4.
-SELECT
-    DATE_TRUNC('hour', start_time) AS hora,
-    ROUND(SUM(credits_used), 4)    AS creditos
-FROM TABLE(INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY(
-    DATE_RANGE_START => DATEADD('day', -1, CURRENT_DATE()),
-    WAREHOUSE_NAME   => 'CDC_WH'))
-GROUP BY 1
-ORDER BY 1 DESC;
+-- AT-003 / REQ-03 — monitors (warehouse + account level, FREQUENCY = NEVER) ----
+SHOW RESOURCE MONITORS LIKE 'CDC%';
+SELECT "name", "credit_quota", "used_credits", "frequency", "level",
+       "notify_at", "suspend_at", "suspend_immediately_at"
+FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 
--- NOTA sobre o passo 5 anterior, removido em 2026-08-10:
--- ele chamava `TABLE(INFORMATION_SCHEMA.WAREHOUSES())`, que NÃO EXISTE --
--- "Unknown table function INFORMATION_SCHEMA.WAREHOUSES". O passo nunca teria
--- funcionado, nem com ACCOUNTADMIN. O estado do warehouse, que era o objetivo
--- dele, agora vem do RESULT_SCAN do passo 3.
+EXECUTE IMMEDIATE $$
+DECLARE
+    wh_ok INTEGER DEFAULT 0;
+    account_ok INTEGER DEFAULT 0;
+    at003_failed EXCEPTION (-20003, 'AT-003 failed: CDC_WH_MONITOR (WAREHOUSE) or CDC_ACCOUNT_MONITOR (ACCOUNT) missing, not NEVER, or without suspend thresholds');
+BEGIN
+    SHOW RESOURCE MONITORS LIKE 'CDC%';
+    SELECT COUNT_IF("name" = 'CDC_WH_MONITOR' AND "level" = 'WAREHOUSE' AND "frequency" = 'NEVER'
+                    AND "credit_quota" > 0 AND "suspend_at" IS NOT NULL AND "notify_at" IS NOT NULL),
+           COUNT_IF("name" = 'CDC_ACCOUNT_MONITOR' AND "level" = 'ACCOUNT' AND "frequency" = 'NEVER'
+                    AND "credit_quota" > 0 AND "suspend_at" IS NOT NULL AND "notify_at" IS NOT NULL)
+      INTO :wh_ok, :account_ok
+      FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+    IF (wh_ok <> 1 OR account_ok <> 1) THEN
+        RAISE at003_failed;
+    END IF;
+    RETURN 'AT-003 OK: warehouse and account monitors, FREQUENCY = NEVER, notify + suspend set';
+END;
+$$;
 
+-- AT-003 / Decision 5 — the serverless brake: custom budget on CDC_POC ---------
+EXECUTE IMMEDIATE $$
+DECLARE
+    spending_limit NUMBER;
+    tier VARCHAR;
+    actions INTEGER DEFAULT 0;
+    valid_actions INTEGER DEFAULT 0;
+    budget_failed EXCEPTION (-20005, 'Budget check failed: CDC_BUDGET limit is not 10, tier is not TIER_1H, or its custom action is missing or invalid');
+BEGIN
+    CALL CDC_POC.CONFIG.CDC_BUDGET!GET_SPENDING_LIMIT();
+    SELECT $1 INTO :spending_limit FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+    CALL CDC_POC.CONFIG.CDC_BUDGET!GET_REFRESH_TIER();
+    SELECT $1 INTO :tier FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+    CALL CDC_POC.CONFIG.CDC_BUDGET!CONFIRM_CUSTOM_ACTIONS_ACCESS();
+    SELECT COUNT(*), COUNT_IF("IS_VALID") INTO :actions, :valid_actions
+      FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+    IF (spending_limit <> 10 OR tier <> 'TIER_1H' OR actions < 1 OR valid_actions <> actions) THEN
+        RAISE budget_failed;
+    END IF;
+    RETURN 'Budget OK: limit 10, TIER_1H, ' || actions || ' valid custom action(s)';
+END;
+$$;
 
--- 6. TUDO que a conta consome, por tipo de serviço.
---
---    POR QUE ESTE PASSO EXISTE. Os passos 4 e 5 leem
---    WAREHOUSE_METERING_HISTORY, que só enxerga compute de warehouse. A
---    execução de 2026-08-11 devolveu 1,72 crédito para o CDC_WH e esse número
---    foi tratado como "o consumo do projeto" -- o que é falso, e falso de um
---    jeito estrutural neste pipeline: o caminho de ingestão inteiro é
---    serverless. O Snowpipe Streaming escreve cada linha na Bronze e fatura
---    fora daquela view, assim como Tasks sem warehouse e a camada de cloud
---    services.
---
---    METERING_HISTORY é a fonte que cobre todos os tipos. A coluna
---    SERVICE_TYPE é a resposta: se aparecer alguma linha com crédito
---    relevante que não seja WAREHOUSE_METERING, o custo real do projeto é
---    maior que o documentado no README, e a diferença é justamente a parte
---    que ninguém tinha olhado.
-SELECT
-    service_type,
-    ROUND(SUM(credits_used), 4)                  AS creditos,
-    ROUND(SUM(credits_used_compute), 4)          AS creditos_compute,
-    ROUND(SUM(credits_used_cloud_services), 4)   AS creditos_cloud_services,
-    MIN(start_time)                              AS primeiro,
-    MAX(end_time)                                AS ultimo
-FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_HISTORY
-WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-GROUP BY 1
-ORDER BY 2 DESC;
+-- AT-004 / REQ-04 — gate tasks (only after the first pipeline apply) ----------
+-- Profile optimized: no warehouse, timeout = gate_task_timeout_ms and failure
+-- limit 3 set at task level. Profile baseline: CDC_WH and neither parameter
+-- set at task level (Snowflake defaults, as v2).
+EXECUTE IMMEDIATE $$
+DECLARE
+    check_pipeline VARCHAR DEFAULT '<% check_pipeline %>';
+    profile VARCHAR DEFAULT '<% cost_profile %>';
+    timeout_ms VARCHAR DEFAULT '<% gate_task_timeout_ms %>';
+    tasks INTEGER DEFAULT 0;
+    tasks_ok INTEGER DEFAULT 0;
+    params_bad INTEGER DEFAULT 0;
+    task_level INTEGER DEFAULT 0;
+    timeout_ok INTEGER DEFAULT 0;
+    failures_ok INTEGER DEFAULT 0;
+    rs RESULTSET;
+    at004_failed EXCEPTION (-20004, 'AT-004 failed: expected 10 started *_GATE_TASK in CDC_POC.BRONZE with the profile''s compute and parameters');
+BEGIN
+    IF (check_pipeline <> 'true') THEN
+        RETURN 'AT-004 skipped: check_pipeline = ' || check_pipeline;
+    END IF;
+    SHOW TASKS IN SCHEMA CDC_POC.BRONZE;
+    rs := (SELECT "name" AS task_name,
+                  "state" AS task_state,
+                  COALESCE("warehouse", '') AS task_warehouse
+             FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()))
+            WHERE ENDSWITH("name", '_GATE_TASK'));
+    LET c1 CURSOR FOR rs;
+    FOR rec IN c1 DO
+        tasks := tasks + 1;
+        IF (rec.task_state = 'started'
+            AND rec.task_warehouse = IFF(profile = 'optimized', '', 'CDC_WH')) THEN
+            tasks_ok := tasks_ok + 1;
+        END IF;
+        EXECUTE IMMEDIATE 'SHOW PARAMETERS IN TASK CDC_POC.BRONZE."' || rec.task_name || '"';
+        SELECT COUNT_IF("key" IN ('USER_TASK_TIMEOUT_MS', 'SUSPEND_TASK_AFTER_NUM_FAILURES') AND "level" = 'TASK'),
+               COUNT_IF("key" = 'USER_TASK_TIMEOUT_MS' AND "level" = 'TASK' AND "value" = :timeout_ms),
+               COUNT_IF("key" = 'SUSPEND_TASK_AFTER_NUM_FAILURES' AND "level" = 'TASK' AND "value" = '3')
+          INTO :task_level, :timeout_ok, :failures_ok
+          FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+        IF ((profile = 'optimized' AND (timeout_ok <> 1 OR failures_ok <> 1))
+            OR (profile = 'baseline' AND task_level <> 0)) THEN
+            params_bad := params_bad + 1;
+        END IF;
+    END FOR;
+    IF (tasks <> 10 OR tasks_ok <> 10 OR params_bad <> 0) THEN
+        RAISE at004_failed;
+    END IF;
+    RETURN 'AT-004 OK: 10 started gate tasks, profile ' || profile;
+END;
+$$;
 
-
--- 7. O Query Acceleration Service chegou a engatar alguma vez?
---
---    CONTEXTO. O CDC_WH está com ENABLE_QUERY_ACCELERATION = true e
---    SCALE_FACTOR = 2 (lido em 2026-08-11). QAS fatura crédito ALÉM da
---    compute do warehouse, e ninguém decidiu ligá-lo conscientemente -- veio
---    assim e nunca foi medido.
---
---    COMO LER O RESULTADO:
---      - zero linhas, ou crédito zerado -> nunca engatou. É custo potencial
---        sem benefício demonstrado neste workload, e desligar é de graça:
---          ALTER WAREHOUSE CDC_WH SET ENABLE_QUERY_ACCELERATION = FALSE;
---      - crédito > 0 -> engatou, e aí a conta do README muda: parte do gasto
---        não está no número do passo 4. Antes de desligar, veja quais queries
---        se beneficiaram.
-SELECT
-    warehouse_name,
-    ROUND(SUM(credits_used), 4) AS creditos_qas,
-    SUM(num_files_scanned)      AS arquivos_varridos,
-    MIN(start_time)             AS primeiro,
-    MAX(end_time)               AS ultimo
-FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_ACCELERATION_HISTORY
-WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-GROUP BY 1
-ORDER BY 2 DESC;
-
--- AVISO SOBRE OS PASSOS 6 E 7: escritos em 2026-08-11 e NUNCA EXECUTADOS.
--- Diferente dos passos 1 a 5, que já rodaram, estes dois dependem de nomes de
--- view e de coluna que não foram confirmados contra esta conta. Se algum
--- deles falhar com "invalid identifier" ou "does not exist", o problema é a
--- query, não a conta -- e a correção vale ser commitada, porque o objetivo
--- deste arquivo é justamente não deixar pergunta sem resposta verificável.
-
--- ── RESULTADO DA PRIMEIRA EXECUÇÃO (2026-08-11, como ACCOUNTADMIN) ──────
---
--- Passos 1 e 2: VAZIOS. Como ACCOUNTADMIN isso deixa de ser ambíguo e vira
--- resposta: não existe Resource Monitor nenhum nesta conta, nem no nível de
--- conta nem em lugar algum. O passo 3 confirmou resource_monitor = null no
--- CDC_WH. As três camadas onde uma trava poderia existir estão vazias.
---
--- A hipótese dos dois monitores, que motivou este arquivo, estava mal
--- formulada. Não eram dois coexistindo com propósitos diferentes -- era
--- nenhum. O cdc_poc_monitor seria criado por scripts/snowflake_setup.sql,
--- que também não existia; foi escrito na mesma data e ainda não rodou.
---
--- Passos 4 e 5: 1,72 crédito no CDC_WH desde 2026-08-06, com dois dias
--- consecutivos em zero absoluto. Os dois bateram entre si na quarta casa
--- decimal para o dia corrente, então ACCOUNT_USAGE não estava defasado.
---
--- ── Ação recomendada após rodar este script ─────────────────────────────
---
--- A recomendação original supunha encontrar um monitor mal configurado. Como
--- não havia monitor algum, ela virou outra coisa: CRIAR o que nunca existiu.
--- Feito no mesmo dia -- scripts/snowflake_setup.sql rodou às 09:54 e criou o
--- CDC_POC_MONITOR (20 créditos, MONTHLY, level WAREHOUSE), vinculado ao
--- CDC_WH. Uma reexecução deste arquivo agora deve devolver uma linha no passo
--- 1 e CDC_POC_MONITOR no passo 3, em vez dos vazios de antes.
---
--- O que a criação do monitor NÃO resolveu: ele é de nível de warehouse, então
--- só enxerga o CDC_WH. Consumo serverless -- que neste pipeline é o caminho
--- de ingestão inteiro -- continua sem teto. É o que o passo 6 mede.
--- O NOTIFY_USERS foi preenchido em 2026-08-11 com o login humano da conta,
--- cujo IS_EMAIL_VERIFIED é true -- os gatilhos de 50% e 75% passaram a
--- entregar de verdade. Confira as duas coisas juntas ao auditar: e-mail
--- verificado sem NOTIFY_USERS não avisa ninguém, e NOTIFY_USERS apontando
--- para e-mail não verificado é aceito sem erro e também não avisa ninguém.
---
--- Se numa execução futura aparecer QUALQUER monitor com FREQUENCY = NEVER
--- ativo e vinculado ao CDC_WH, a orientação antiga volta a valer: ele não
--- reseta sozinho e não protegeria de vazamento contínuo. Substitua ou remova:
---   ALTER WAREHOUSE CDC_WH SET RESOURCE_MONITOR = cdc_poc_monitor;
---   ALTER ACCOUNT UNSET RESOURCE_MONITOR;  -- se aplicável, e após revisão
+-- AT-004 idle criterion — informational, read after 1 h without load ---------
+-- During the idle window every gate-task run should be a skipped evaluation
+-- (WHEN false). Not asserted here: the window is a measurement step
+-- (docs/measurement/PROTOCOL.md), and the nominal WHEN charge (F3) is read from
+-- the metering views, not from this query.
+SELECT name, state, COUNT(*) AS runs
+FROM TABLE(CDC_POC.INFORMATION_SCHEMA.TASK_HISTORY(
+    SCHEDULED_TIME_RANGE_START => DATEADD('hour', -1, CURRENT_TIMESTAMP()),
+    RESULT_LIMIT => 10000))
+WHERE ENDSWITH(name, '_GATE_TASK')
+GROUP BY name, state
+ORDER BY name, state;

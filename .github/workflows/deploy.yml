@@ -113,8 +113,8 @@ jobs:
       - name: Aplicar governança Snowflake (Resource Monitor, Time Travel, Streams+Tasks)
         run: |
           echo "Rode manualmente via SnowSQL/worksheet como ACCOUNTADMIN:"
-          echo "  scripts/snowflake_setup.sql"
-          echo "  scripts/streams_and_tasks.sql"
+          echo "  (replaced by terraform/platform — COST_GOVERNANCE item 8)"
+          echo "  (replaced by terraform/pipeline — COST_GOVERNANCE item 8)"
           echo "Não automatizado neste workflow propositalmente — mudanças de"
           echo "governança de conta (RESOURCE MONITOR, GRANT EXECUTE TASK) exigem"
           echo "ACCOUNTADMIN e revisão humana, não deveriam rodar sem supervisão"

@@ -1,4 +1,4 @@
-"""Static guards for terraform/platform (DESIGN_COST_GOVERNANCE 1.1).
+"""Static guards for terraform/platform (DESIGN_COST_GOVERNANCE 1.2).
 
 These checks run without Snowflake, AWS or the Terraform binary. They turn two
 review conditions into tests:
@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 import pytest
+from tfparse import blocks, provider_alias, strip_comments
 
 ROOT = Path(__file__).resolve().parents[2]
 PLATFORM = ROOT / "terraform" / "platform"
@@ -34,46 +35,12 @@ ACCOUNTADMIN_ALLOWED = {
 
 ALIASES = {"sysadmin", "securityadmin", "accountadmin"}
 
-_BLOCK_START = re.compile(r'^(resource|provider|variable)\s+"([^"]+)"(?:\s+"([^"]+)")?\s*\{', re.M)
-
-
-def _strip_comments(text: str) -> str:
-    return re.sub(r"(?m)#.*$", "", text)
-
-
 def _blocks(kind: str) -> dict[str, str]:
-    """Return {"type.name": body} (or {"name": body}) for top-level blocks of ``kind``."""
-    found: dict[str, str] = {}
-    for path in sorted(PLATFORM.glob("*.tf")):
-        text = _strip_comments(path.read_text())
-        for match in _BLOCK_START.finditer(text):
-            if match.group(1) != kind:
-                continue
-            depth, i = 0, match.end() - 1
-            while True:
-                ch = text[i]
-                depth += ch == "{"
-                depth -= ch == "}"
-                i += 1
-                if depth == 0:
-                    break
-            body = text[match.end() : i - 1]
-            if kind == "resource":
-                key = f"{match.group(2)}.{match.group(3)}"
-            elif kind == "provider":
-                alias = re.search(r'alias\s*=\s*"([^"]+)"', body)
-                key = alias.group(1) if alias else "<default>"
-            else:
-                key = match.group(2)
-            assert key not in found, f"duplicate {kind} {key}"
-            found[key] = body
-    return found
+    return blocks(PLATFORM, kind)
 
 
-def _provider_alias(body: str) -> str | None:
-    match = re.search(r"^\s*provider\s*=\s*snowflake\.(\w+)", body, re.M)
-    return match.group(1) if match else None
-
+_provider_alias = provider_alias
+_strip_comments = strip_comments
 
 RESOURCES = _blocks("resource")
 
