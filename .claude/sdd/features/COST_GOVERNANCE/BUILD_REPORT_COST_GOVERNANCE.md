@@ -10,8 +10,8 @@
 | **Date** | 2026-11-18 |
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.1 |
-| **Status** | In Progress — items 1–4 built; 5–22 pending |
+| **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.2 |
+| **Status** | In Progress — items 1–6 built; 7–22 pending |
 
 ---
 
@@ -129,8 +129,86 @@ is not installed in the repo or the system.
 
 ---
 
+## Run 2 — 2026-11-18 — manifest items 5–6
+
+Branch `feat/cost-governance-items-5-6`, stacked on `feat/cost-governance-items-1-4` (PR #1 still
+open). Requirements: REQ-01 (exceptions 2 and 3), REQ-03.
+
+### DESIGN 1.1 → 1.2 (owner decisions, before code)
+
+Docs read first: *Custom actions for budgets*, `CREATE BUDGET`, `ADD_CUSTOM_ACTION`,
+`SET_REFRESH_TIER`, `SET_CYCLE_START_ACTION`, `SET_EMAIL_NOTIFICATIONS`, `ADD_RESOURCE`,
+`GET_BUDGET_SCOPE`, `CONFIRM_CUSTOM_ACTIONS_ACCESS`, *Notifications for budgets*, Snowflake CLI
+`snow sql` templating (all read 2026-11-18). Owner decisions:
+
+1. Refresh tier **`TIER_1H`**. Official numbers replace F8's third-party source: default `TIER_6H`
+   is "up to 6.5 hours"; `TIER_1H` is 1 h at a budget cost "12 times higher" (absolute cost not
+   stated).
+2. **No cycle-start action.** `REMOVE_CYCLE_START_ACTION` keeps it that way. Resume stays manual.
+3. **`budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role**, not ACCOUNTADMIN. Its
+   `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list (only the owner grants
+   SNOWFLAKE database roles).
+4. **New `CDC_CI_WH`** for the CI SQL steps. The DESIGN did not say which warehouse they use; on
+   `CDC_WH`, the 00:00 UTC switch merge would resume the pipeline warehouse inside the windows
+   (validity rule).
+
+Decision 5/8 worst case recomputed: ~1.5 credits overshoot per month before the action fires
+(was ~12), ~63 credits pathological total (was ~84 / ~62). DESIGN 1.2 was **not** shown to the
+owner as a diff before this Build; the decisions were. Review the DESIGN diff in this PR.
+
+### Files
+
+| # | File | Notes |
+|---|------|-------|
+| 5 | `scripts/bootstrap_config.sql` → `scripts/seed_config.sql` | `git mv` + rewrite: insert-only MERGE of the 10 Tier-1 domains; DDL, grants and the Tier-2 `UPDATE` removed (DDL/grants are in Terraform; Tier-2 rows never exist on a new account). `notes` translated to English. `SYSADMIN` on `CDC_CI_WH`. |
+| 6 | `scripts/account_monitor.sql` | `ALTER ACCOUNT SET RESOURCE_MONITOR = CDC_ACCOUNT_MONITOR` + `SHOW` read-back. ACCOUNTADMIN (required, F14). No warehouse. |
+| 6 | `scripts/budget.sql` | Grants to `APPLICATION SNOWFLAKE` (SYSADMIN), then as `CDC_BUDGET_ADMIN`: `CREATE … BUDGET IF NOT EXISTS CDC_POC.CONFIG.CDC_BUDGET`, limit 10, `TIER_1H`, e-mail from `<% notify_email %>`, notification threshold 100, `ADD_RESOURCE(CDC_POC)` only if `GET_BUDGET_SCOPE` lacks it, `REMOVE_CUSTOM_ACTIONS` + `ADD_CUSTOM_ACTION(SP_SUSPEND_GATE_TASKS(), 'ACTUAL', 100)`, `REMOVE_CYCLE_START_ACTION`, six read-back calls incl. `CONFIRM_CUSTOM_ACTIONS_ACCESS`. |
+| 6 | `terraform/platform/{variables,roles,grants,warehouse}.tf` | Changes item-4 files (same feature): role `CDC_BUDGET_ADMIN` (→ SYSADMIN, → `TERRAFORM_SVC`); grants `APPLYBUDGET`+USAGE on `CDC_POC`, `CREATE SNOWFLAKE.CORE.BUDGET`+USAGE on CONFIG, USAGE on the procedure and on `CDC_CI_WH`; `SNOWFLAKE.BUDGET_CREATOR` on `accountadmin`; warehouse `CDC_CI_WH` (XSMALL, Gen1, QA off, 60 s, `sysadmin`); plan role MONITOR on both warehouses. |
+| — | `tests/unit/test_sql_scripts.py` | 20 checks: no `DROP`/`TRUNCATE`/`DELETE`/`CREATE OR REPLACE`/`UPDATE`/`RESUME`; `USE WAREHOUSE` only `CDC_CI_WH`; no e-mail address and no `&` (legacy CLI templating) in the scripts; ACCOUNTADMIN only in `account_monitor.sql`; names agree with Terraform; seed = exactly the 10 Tier-1 domains, insert-only; budget idempotency order and DESIGN values. |
+| — | `tests/unit/test_terraform_providers.py` | Allowlist + `budget_creator`; `CDC_CI_WH` is Gen1 and not on the pipeline monitor. |
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `terraform -chdir=terraform fmt -check -recursive` | ✅ exit 0 |
+| `terraform -chdir=terraform/platform validate` | ✅ valid |
+| `ruff check .` | ✅ All checks passed |
+| `pytest tests/unit -q` | ✅ 69 passed |
+| `snow sql` / `terraform plan` | ⏭️ Not run: no identities on the account yet; first run in CI (item 16) |
+
+### Deviations from DESIGN 1.2
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| `SET_NOTIFICATION_THRESHOLD(100)` (DESIGN: "notify … at 100%") | Default is 110% of **projected** spend; 100 aligns the e-mail with the action threshold | E-mail on projected ≥ 100%; action on actual ≥ 100% |
+| `GET_BUDGET_SCOPE` (not the deprecated `GET_LINKED_RESOURCES`) to test scope | Docs mark `GET_LINKED_RESOURCES` deprecated | — |
+
+### Open issues (new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O9 | Budgets / custom actions on a **trial** account: not stated in the docs (B2). First CI run of `budget.sql` answers it; if unavailable, Decision 5's ceiling is timeout + failure limit + task-state check | Day 3–5 | build-agent |
+| O10 | Unverified on the account: `CALL <budget>!<method>` and `RESULT_SCAN` inside `EXECUTE IMMEDIATE`; `GET_BUDGET_SCOPE` return type (parsed with `PARSE_JSON(TO_VARCHAR(…))`); `REMOVE_CYCLE_START_ACTION` / `REMOVE_CUSTOM_ACTIONS` when nothing is set (if they error, guard them — never swallow errors) | First CI run | build-agent |
+| O11 | `CREATE SNOWFLAKE.CORE.BUDGET` and `APPLYBUDGET` as provider privilege strings are validated only at apply | Day 3 | build-agent |
+| O12 | `BUDGET_NOTIFY_EMAIL` variable in the `snowflake-dev` environment; address verified in Snowflake (`SET_EMAIL_NOTIFICATIONS` fails otherwise) | Before the first `main` run | Christian |
+| O13 | `TIER_1H` budget cost: measure in the dry run (`METERING_HISTORY` by service type) and report it | Day 7 | Christian |
+| O14 | README still lists `bootstrap_config.sql` and the v2 order of scripts | Item 22 (Day 14) | Christian |
+| O15 | DESIGN Decision 11 still says the CI SQL steps run in the order seed → account_monitor → budget, which is what the scripts assume; `CDC_CI_WH` must exist first (it does: platform apply precedes them) | Item 16 | build-agent |
+
+### Build checklist status after run 2
+
+| # | Status |
+|---|--------|
+| B2 | **Partially closed:** refresh delay from official docs (6.5 h / 1 h, TIER_1H chosen); worst case recomputed. Open: timeout vs `suspend_task_after_num_failures`; trial availability (O9) |
+| B5 | **Partially closed:** `budget.sql` idempotent by construction and by test. Open: `PROTOCOL.md` items |
+| B1, B3, B4 | Unchanged |
+
+---
+
 ## Next Step
 
-Owner reviews and merges the PR for items 1–4 (CI apply comes with item 16). Then
-`/sdd-build COST_GOVERNANCE items 5-6` (seed + `budget.sql` + `account_monitor.sql`).
+Owner reviews PR #1 (items 1–4), then the stacked PR for items 5–6. Next build:
+`/sdd-build COST_GOVERNANCE items 7-9` (pipeline root, retire old scripts, `verify_governance.sql`)
+or `items 10-14` (Python: `gate.py`, sensor, job, tests, load generator) — independent of each other.
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.

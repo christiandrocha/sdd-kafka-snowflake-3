@@ -43,6 +43,12 @@ variable "warehouse_name" {
   default     = "CDC_WH"
 }
 
+variable "ci_warehouse_name" {
+  description = "Warehouse for the CI SQL steps; keeps CI off CDC_WH during the measurement windows."
+  type        = string
+  default     = "CDC_CI_WH"
+}
+
 variable "role_name" {
   description = "Pipeline write role: Dagster, dbt, the Kafka sink."
   type        = string
@@ -53,6 +59,18 @@ variable "readonly_role_name" {
   description = "Read-only exploration role (Cursor MCP)."
   type        = string
   default     = "CDC_ROLE_RO"
+}
+
+variable "budget_role_name" {
+  description = "Runs scripts/budget.sql in CI instead of ACCOUNTADMIN (Decision 9, exception 2)."
+  type        = string
+  default     = "CDC_BUDGET_ADMIN"
+}
+
+variable "terraform_user_name" {
+  description = "Apply identity created by scripts/00_terraform_bootstrap.sql; receives the budget role."
+  type        = string
+  default     = "TERRAFORM_SVC"
 }
 
 variable "governance_role_name" {

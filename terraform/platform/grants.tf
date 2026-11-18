@@ -144,17 +144,73 @@ resource "snowflake_grant_database_role" "governance" {
   parent_role_name   = snowflake_account_role.cdc[var.governance_role_name].name
 }
 
+# --- CDC_BUDGET_ADMIN: what scripts/budget.sql needs (Decision 9, exception 2) -
+# CREATE BUDGET: CREATE SNOWFLAKE.CORE.BUDGET on the schema + SNOWFLAKE.BUDGET_CREATOR.
+# ADD_RESOURCE: APPLYBUDGET on the database. ADD_CUSTOM_ACTION: USAGE on the
+# procedure (SYSTEM$REFERENCE). Snowflake docs: CREATE BUDGET, ADD_RESOURCE,
+# Custom actions for budgets (read 2026-11-18).
+
+resource "snowflake_grant_privileges_to_account_role" "budget_ci_warehouse" {
+  provider          = snowflake.securityadmin
+  account_role_name = snowflake_account_role.cdc[var.budget_role_name].name
+  privileges        = ["USAGE"]
+  on_account_object {
+    object_type = "WAREHOUSE"
+    object_name = snowflake_warehouse.ci.name
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "budget_database" {
+  provider          = snowflake.securityadmin
+  account_role_name = snowflake_account_role.cdc[var.budget_role_name].name
+  privileges        = ["APPLYBUDGET", "USAGE"]
+  on_account_object {
+    object_type = "DATABASE"
+    object_name = local.db
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "budget_schema" {
+  provider          = snowflake.securityadmin
+  account_role_name = snowflake_account_role.cdc[var.budget_role_name].name
+  privileges        = ["CREATE SNOWFLAKE.CORE.BUDGET", "USAGE"]
+  on_schema {
+    schema_name = snowflake_schema.cdc["CONFIG"].fully_qualified_name
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "budget_procedure" {
+  provider          = snowflake.securityadmin
+  account_role_name = snowflake_account_role.cdc[var.budget_role_name].name
+  privileges        = ["USAGE"]
+  on_schema_object {
+    object_type = "PROCEDURE"
+    object_name = snowflake_procedure_sql.suspend_gate_tasks.fully_qualified_name
+  }
+}
+
+# Named exception (Decision 9): only the owner grants SNOWFLAKE database roles.
+resource "snowflake_grant_database_role" "budget_creator" {
+  provider           = snowflake.accountadmin # Decision 9 named exception
+  database_role_name = "\"SNOWFLAKE\".\"BUDGET_CREATOR\""
+  parent_role_name   = snowflake_account_role.cdc[var.budget_role_name].name
+}
+
 # --- TERRAFORM_PLAN_ROLE: read-only refresh (Decision 9) --------------------
 # Unproven until Day 3: if a refresh fails, grant the specific read privilege
 # that is missing, or plan with -refresh=false for that resource (Decision 9).
 
 resource "snowflake_grant_privileges_to_account_role" "plan_warehouse" {
-  provider          = snowflake.securityadmin
+  provider = snowflake.securityadmin
+  for_each = {
+    cdc = snowflake_warehouse.cdc.name
+    ci  = snowflake_warehouse.ci.name
+  }
   account_role_name = var.plan_role_name
   privileges        = ["MONITOR"]
   on_account_object {
     object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.cdc.name
+    object_name = each.value
   }
 }
 
