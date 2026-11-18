@@ -59,5 +59,5 @@
 
 ## Next Step
 
-**If PASS:** `/ship .claude/sdd/features/{FEATURE_NAME}/`
+**If PASS:** `/sdd-ship {FEATURE_NAME}`
 **If FAIL:** back to Build with the findings above as the work list.

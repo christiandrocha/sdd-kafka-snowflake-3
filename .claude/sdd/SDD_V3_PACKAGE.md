@@ -208,7 +208,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Design — draft 0.5 (two review rounds applied); awaiting independent sign-off; DEFINE 1.4 wording pending owner OK | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
+| COST_GOVERNANCE | Design — draft 0.5 (two review rounds applied); awaiting independent sign-off | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](#part-7--define-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
@@ -276,7 +276,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (Day 3) | Lower the limits if 60 credits > 50% of the balance |
 | 3 | Repository name | No | `sdd-kafka-snowflake-3` |
 | 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
-| 5 | Terraform state backend | No | S3 bucket + DynamoDB lock in the same AWS account |
+| 5 | ~~Terraform state backend~~ — resolved: S3 with native lockfile, no DynamoDB (DESIGN Decision 12) | Resolved | — |
 
 #### Next feature after v3 ships
 
@@ -503,7 +503,7 @@ its method. The README states the number we got, not the number we hoped for.
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
 | 1.1 | 2026-11-17 | Christian (with Claude) | New trial account `GWHUBCF-QQ53235`: open question 1 resolved as moot; REQ-02/AT-002 use `GENERATION = '1'` and pin query acceleration off; A-001 validated; A-002 risk raised; A-006 and trial constraint added |
 | 1.2 | 2026-11-17 | Christian | Approved. Scope frozen. |
-| 1.4 | 2026-11-17 | Christian (pending OK) | Wording aligned with justified exceptions from the second design review, no scope change: REQ-01 names the bootstrap exception and the CI SQL steps; REQ-08 states the fork and pipeline-skip cases; AT-004 accounts for the nominal `WHEN` charge; workflow ownership aligned with the DESIGN; clarity note and next step updated. |
+| 1.4 | 2026-11-17 | Christian | Wording aligned with justified exceptions from the second design review, no scope change: REQ-01 names the bootstrap exception and the CI SQL steps; REQ-08 states the fork and pipeline-skip cases; AT-004 accounts for the nominal `WHEN` charge; workflow ownership aligned with the DESIGN; clarity note and next step updated. |
 | 1.3 | 2026-11-17 | Christian | From the design review, no scope change: AT-002 refers to the configurable warehouse name and is checked in profile `optimized`; idle window added to REQ-07; measurement cap 25 credits; query acceleration off in both configs (documented deviation from v2); open questions 2–6 resolved. |
 
 ---
@@ -528,7 +528,7 @@ its method. The README states the number we got, not the number we hoped for.
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 (wording of REQ-01/REQ-08 pending owner OK) |
+| **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
 | **Status** | Draft 0.5 — second review applied; awaiting an independent sign-off (fresh session) |
 
 ---
@@ -1392,7 +1392,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 Independent sign-off in a **fresh** session (DEFINE 1.4 + this file), scoped to blockers only: anything
 not blocking goes to the Build notes instead of another review round.
-Then **Ready for:** `/build .claude/sdd/features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md`
+Then **Ready for:** `/sdd-build COST_GOVERNANCE <items>`
 
 ---
 
@@ -1787,7 +1787,7 @@ Based on this brainstorm session, the following should be captured in the DEFINE
 
 ##### Next Step
 
-**Ready for:** `/define .claude/sdd/features/BRAINSTORM_{FEATURE_NAME}.md`
+**Ready for:** `/sdd-define {FEATURE_NAME}`
 
 </details>
 
@@ -1930,7 +1930,7 @@ Measurable outcomes. Each one states **the number, the source of the number, and
 
 ##### Next Step
 
-**Ready for:** `/design .claude/sdd/features/{FEATURE_NAME}/DEFINE_{FEATURE_NAME}.md`
+**Ready for:** `/sdd-design {FEATURE_NAME}`
 
 </details>
 
@@ -2165,7 +2165,7 @@ Measurable outcomes. Each one states **the number, the source of the number, and
 
 ##### Next Step
 
-**Ready for:** `/build .claude/sdd/features/{FEATURE_NAME}/DESIGN_{FEATURE_NAME}.md` — only after an independent design review (second opinion) is recorded in Revision History.
+**Ready for:** `/sdd-build {FEATURE_NAME} <items>` — only after an independent design review (second opinion) is recorded in Revision History.
 
 </details>
 
@@ -2335,9 +2335,9 @@ Measurable outcomes. Each one states **the number, the source of the number, and
 
 ##### Next Step
 
-**If Complete:** `/validate .claude/sdd/features/{FEATURE_NAME}/` (never by the agent that built it)
+**If Complete:** `/sdd-validate {FEATURE_NAME}` in a fresh chat (never by the agent that built it)
 
-**If Blocked:** Resolve blockers, then `/build` to resume
+**If Blocked:** Resolve blockers, then `/sdd-build {FEATURE_NAME} <items>` to resume
 
 **If Issues Found:** `/iterate DESIGN_{FEATURE}.md "{change needed}"`
 
@@ -2408,7 +2408,7 @@ Measurable outcomes. Each one states **the number, the source of the number, and
 
 ##### Next Step
 
-**If PASS:** `/ship .claude/sdd/features/{FEATURE_NAME}/`
+**If PASS:** `/sdd-ship {FEATURE_NAME}`
 **If FAIL:** back to Build with the findings above as the work list.
 
 </details>

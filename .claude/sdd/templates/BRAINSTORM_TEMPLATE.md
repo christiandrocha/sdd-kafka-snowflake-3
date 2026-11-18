@@ -189,4 +189,4 @@ Based on this brainstorm session, the following should be captured in the DEFINE
 
 ## Next Step
 
-**Ready for:** `/define .claude/sdd/features/BRAINSTORM_{FEATURE_NAME}.md`
+**Ready for:** `/sdd-define {FEATURE_NAME}`

@@ -10,7 +10,7 @@
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 (wording of REQ-01/REQ-08 pending owner OK) |
+| **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **Status** | Draft 0.5 — second review applied; awaiting an independent sign-off (fresh session) |
 
 ---
@@ -874,4 +874,4 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 Independent sign-off in a **fresh** session (DEFINE 1.4 + this file), scoped to blockers only: anything
 not blocking goes to the Build notes instead of another review round.
-Then **Ready for:** `/build .claude/sdd/features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md`
+Then **Ready for:** `/sdd-build COST_GOVERNANCE <items>`

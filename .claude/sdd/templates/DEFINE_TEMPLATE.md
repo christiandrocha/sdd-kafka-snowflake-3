@@ -133,4 +133,4 @@ Measurable outcomes. Each one states **the number, the source of the number, and
 
 ## Next Step
 
-**Ready for:** `/design .claude/sdd/features/{FEATURE_NAME}/DEFINE_{FEATURE_NAME}.md`
+**Ready for:** `/sdd-design {FEATURE_NAME}`

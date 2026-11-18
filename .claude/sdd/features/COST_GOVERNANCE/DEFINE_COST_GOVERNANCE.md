@@ -206,7 +206,7 @@ its method. The README states the number we got, not the number we hoped for.
 | 1.0 | 2026-11-17 | Christian (with Claude) | Initial version |
 | 1.1 | 2026-11-17 | Christian (with Claude) | New trial account `GWHUBCF-QQ53235`: open question 1 resolved as moot; REQ-02/AT-002 use `GENERATION = '1'` and pin query acceleration off; A-001 validated; A-002 risk raised; A-006 and trial constraint added |
 | 1.2 | 2026-11-17 | Christian | Approved. Scope frozen. |
-| 1.4 | 2026-11-17 | Christian (pending OK) | Wording aligned with justified exceptions from the second design review, no scope change: REQ-01 names the bootstrap exception and the CI SQL steps; REQ-08 states the fork and pipeline-skip cases; AT-004 accounts for the nominal `WHEN` charge; workflow ownership aligned with the DESIGN; clarity note and next step updated. |
+| 1.4 | 2026-11-17 | Christian | Wording aligned with justified exceptions from the second design review, no scope change: REQ-01 names the bootstrap exception and the CI SQL steps; REQ-08 states the fork and pipeline-skip cases; AT-004 accounts for the nominal `WHEN` charge; workflow ownership aligned with the DESIGN; clarity note and next step updated. |
 | 1.3 | 2026-11-17 | Christian | From the design review, no scope change: AT-002 refers to the configurable warehouse name and is checked in profile `optimized`; idle window added to REQ-07; measurement cap 25 credits; query acceleration off in both configs (documented deviation from v2); open questions 2–6 resolved. |
 
 ---

@@ -160,8 +160,8 @@
 
 ## Next Step
 
-**If Complete:** `/validate .claude/sdd/features/{FEATURE_NAME}/` (never by the agent that built it)
+**If Complete:** `/sdd-validate {FEATURE_NAME}` in a fresh chat (never by the agent that built it)
 
-**If Blocked:** Resolve blockers, then `/build` to resume
+**If Blocked:** Resolve blockers, then `/sdd-build {FEATURE_NAME} <items>` to resume
 
 **If Issues Found:** `/iterate DESIGN_{FEATURE}.md "{change needed}"`

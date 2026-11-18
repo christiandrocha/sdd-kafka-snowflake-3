@@ -225,4 +225,4 @@
 
 ## Next Step
 
-**Ready for:** `/build .claude/sdd/features/{FEATURE_NAME}/DESIGN_{FEATURE_NAME}.md` — only after an independent design review (second opinion) is recorded in Revision History.
+**Ready for:** `/sdd-build {FEATURE_NAME} <items>` — only after an independent design review (second opinion) is recorded in Revision History.
