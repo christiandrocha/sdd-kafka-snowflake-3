@@ -29,6 +29,7 @@ ACCOUNTADMIN_ALLOWED = {
     "snowflake_warehouse.cdc",
     "snowflake_grant_privileges_to_account_role.plan_monitors",
     "snowflake_grant_database_role.governance",
+    "snowflake_grant_database_role.budget_creator",
 }
 
 ALIASES = {"sysadmin", "securityadmin", "accountadmin"}
@@ -145,3 +146,10 @@ def test_secrets_never_in_terraform():
         text = _strip_comments(path.read_text())
         assert "private_key" not in text, path.name
         assert "-----BEGIN" not in text, path.name
+
+
+def test_ci_warehouse_is_gen1_and_off_the_pipeline_monitor():
+    body = RESOURCES["snowflake_warehouse.ci"]
+    assert re.search(r'generation\s*=\s*"1"', body)
+    assert "resource_monitor" not in body
+    assert re.search(r"auto_suspend\s*=\s*60\b", body)

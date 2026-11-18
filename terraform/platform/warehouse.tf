@@ -22,3 +22,21 @@ resource "snowflake_warehouse" "cdc" {
   resource_monitor          = snowflake_resource_monitor.cdc_wh.name
   comment                   = "CDC pipeline. Every cost setting is explicit; see DESIGN_COST_GOVERNANCE."
 }
+
+# Warehouse for the CI SQL steps (seed_config.sql, budget.sql,
+# verify_governance.sql) — DESIGN 1.2, validity rules: CI must never resume
+# CDC_WH, because the profile-switch PR merges at 00:00 UTC inside the windows.
+# Excluded from the analysis like COMPUTE_WH; covered by the account monitor.
+# Not a cost-profile object: always Gen1, never changes between A and B.
+resource "snowflake_warehouse" "ci" {
+  provider                  = snowflake.sysadmin
+  name                      = var.ci_warehouse_name
+  warehouse_type            = "STANDARD"
+  warehouse_size            = "XSMALL"
+  generation                = "1"
+  enable_query_acceleration = false
+  auto_suspend              = 60
+  auto_resume               = true
+  initially_suspended       = true
+  comment                   = "CI SQL steps only. Excluded from the A/B analysis."
+}

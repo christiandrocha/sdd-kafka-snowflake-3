@@ -11,7 +11,7 @@
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | 1.1 — Ready for Build (owner review of the 1.0 → 1.1 diff, 2026-11-18; 1.0 signed off by independent review 2026-11-18) |
+| **Status** | 1.2 — Ready for Build (owner decisions 2026-11-18 at the items 5–6 Build; 1.1 owner-reviewed; 1.0 signed off by independent review 2026-11-18) |
 
 ---
 
@@ -26,7 +26,7 @@
 | F5 | Bronze tables are created by the Kafka connector (`enable.schematization=true`). Streams need existing tables. | v2 connector config, v2 `deploy.yml` order | Two Terraform roots (Decision 1). |
 | F6 | `RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. Read-back: after `CREATE WAREHOUSE … GENERATION = '1'`, `SHOW WAREHOUSES` returned `resource_constraint = STANDARD_GEN_1` and `generation = 1` (the constraint is rejected on write but reported on read). Provider side (2.23.0 schema, read 2026-11-18): `snowflake_warehouse.generation` accepts `1` \| `2`; `resource_constraint` is documented as "only available for snowpark-optimized warehouses. For setting generation please use the `generation` field" — so the config sets `generation` only and never `resource_constraint`. | Live probe on `GWHUBCF-QQ53235`, 2026-11-17; provider schema 2.23.0 (`terraform providers schema -json`), 2026-11-18 | DEFINE 1.1 REQ-02; AT-002 output format (Build checklist B4); Decision 4 sets `generation` only. |
 | F7 | Budgets can call a **stored procedure** when actual or projected spend reaches a threshold (custom actions), and another one when the cycle restarts. A custom budget that contains a database monitors the serverless tasks in it. | Snowflake docs, *Custom actions for budgets*; release notes 2025-12-10 and 2026-02-24; *Budgets* | An automatic action that suspends the gate tasks is possible (Decision 5). |
-| F8 | Budget spend data refreshes with a delay: up to ~8 h on the standard tier, ~1 h on a faster tier. | third-party guide (Medium); to confirm in docs at Build | The budget action is a backstop, not a fast brake. |
+| F8 | Budget spend data refreshes with a delay: `TIER_6H` (default) "up to 6.5 hours"; `TIER_1H` one hour, at a budget cost "12 times higher" than the default (absolute cost not stated). **Actual**-trigger custom actions run at most once a month; failed actions are retried once, so the procedure must be idempotent. | Snowflake docs, [`SET_REFRESH_TIER`](https://docs.snowflake.com/en/sql-reference/classes/budget/methods/set_refresh_tier), [*Custom actions for budgets*](https://docs.snowflake.com/en/user-guide/budgets/custom-actions) (read 2026-11-18; replaces the 1.0 third-party source) | The budget action is a backstop, not a fast brake. `TIER_1H` chosen (owner decision 2026-11-18); its own cost is measured in the dry run and is identical in windows A and B. |
 | F9 | A resource monitor with `FREQUENCY = NEVER` never resets its used credits. | Snowflake docs, `CREATE RESOURCE MONITOR` | Monitors sized for the whole trial, not per calendar month (Decision 8). |
 | F10 | v2's `CDC_WH` had query acceleration **on** (scale factor 2), read on 2026-08-11; it never engaged in 30 days. `00_account_bootstrap.sql` says `FALSE`, but `CREATE … IF NOT EXISTS` never altered the existing warehouse. | v2 README *Cost governance*, `scripts/snowflake_setup.sql` | Profile A deviates from v2 on this one setting, by owner decision (see Cost profiles). |
 | F11 | The latest provider is **2.23.0**. `snowflake_table`, `snowflake_procedure_sql` and `snowflake_current_account` are **preview features**: they must be listed in the provider's `preview_features_enabled`, and "may have breaking changes in future releases, even without raising the major version". | provider schema 2.23.0, `preview_features_enabled` description (read 2026-11-18) | `terraform/platform` enables exactly `snowflake_table_resource` and `snowflake_procedure_sql_resource`; the exact provider version is pinned in `.terraform.lock.hcl` (Decision 4) and upgraded only by PR. Risk added. |
@@ -98,8 +98,9 @@ AT-002 (generation 1) is verified in profile B; in profile A it fails by constru
 | `terraform/env/dev.tfvars` | The only place `cost_profile` and limits are set; changed by PR | HCL |
 | `scripts/00_terraform_bootstrap.sql` | One-time manual step: Terraform identities (Decision 9) | SQL, run once as `ACCOUNTADMIN` |
 | `scripts/seed_config.sql` | `TABLE_METADATA` seed (renamed from `bootstrap_config.sql`, DDL moved to Terraform) | SQL, CI step |
+| `terraform/platform` `CDC_CI_WH` | Warehouse for the CI SQL steps; keeps CI off `CDC_WH` during the windows | Terraform (`sysadmin` alias; covered by the account monitor) |
 | `scripts/account_monitor.sql` | Assigns the Terraform-created `account_monitor` to the account; idempotent | SQL, CI step (exception 3) |
-| `scripts/budget.sql` | Custom budget on `CDC_POC`, limit, refresh tier, custom action + cycle-start action | SQL, CI step (exception 2) |
+| `scripts/budget.sql` | Custom budget on `CDC_POC`, limit, refresh tier, e-mail, custom action; no cycle-start action | SQL, CI step (exception 2), role `CDC_BUDGET_ADMIN` |
 | `scripts/verify_governance.sql` | Read-only account checks for AT-002/003/004 | SQL |
 | `dagster/pipeline/gate.py` | Pure decision function for the sensor | Python |
 | `dagster/pipeline/sensors.py`, `jobs.py` | Sensor uses `gate.decide`; job records the consumed `run_key` | Python, Dagster |
@@ -232,16 +233,17 @@ On top, a **custom budget** scoped to `CDC_POC` (F7) with:
 - a monthly limit and Snowflake's notifications;
 - a custom action on **actual** spend at 100% calling `CONFIG.SP_SUSPEND_GATE_TASKS()`, which
   suspends the ten gate tasks;
-- a cycle-start action that does **not** resume them automatically — resuming is a human step in the
-  `budget-alert` runbook, after the cause is understood;
-- the faster refresh tier if available on the trial (F8; cost of the tier to be checked at Build).
+- **no cycle-start action** (owner decision 2026-11-18): `budget.sql` calls
+  `REMOVE_CYCLE_START_ACTION` so none can linger, and nothing resumes the tasks automatically —
+  resuming is a human step in the `budget-alert` runbook, after the cause is understood;
+- refresh tier `TIER_1H` (F8, owner decision 2026-11-18).
 
 **The numbers, stated plainly:**
 - Healthy case: ~10 runs/burst × < 1 s — negligible next to warehouse uptime.
 - Pathological worst case (every task times out every minute): 10 × 10 s per minute = 100 s/min of
   XSMALL ≈ 1.67 compute-hours/hour × 0.9 ≈ **1.5 credits/hour**.
-- Detection delay of the budget action (F8): up to ~8 h on the standard tier → worst-case exposure
-  ≈ **12 credits** before the action fires (≈ 1.5 credits on the 1-hour tier).
+- Detection delay of the budget action (F8): ~1 h on `TIER_1H` → worst-case exposure ≈ **1.5 credits**
+  before the action fires (it would be ≈ 9.75 on the default 6.5-hour tier).
 
 **A task that suspends itself must not go unnoticed.** After each load cluster the generator runs
 `SHOW TASKS IN SCHEMA CDC_POC.BRONZE` on a connection **without a warehouse** (metadata only, no
@@ -356,9 +358,9 @@ gate tasks in profile B — ~5 bursts × 10 domains × 12 clusters/day × ~2 s �
 10-credit monthly limit: the action should not fire during a healthy window B.
 
 **Worst case, stated with the detection delay:** warehouses 40 (account monitor, `NEVER`) + budget
-2 × 10 (two calendar months) + up to ~12 credits of overshoot per month before the budget action fires
-(Decision 5, F8) ≈ **84 credits** in the pathological case, ≈ **62** if the 1-hour refresh tier is
-available. At USD 3–4/credit that is ~65–80% of the trial in the worst case — **acceptable only because
+2 × 10 (two calendar months) + up to ~1.5 credits of overshoot per month before the budget action fires
+on `TIER_1H` (Decision 5, F8) ≈ **63 credits** in the pathological case (≈ 80 on the default tier).
+At USD 3–4/credit that is ~50–65% of the trial in the worst case — **acceptable only because
 it requires every gate task to time out every minute for hours**; the task-state check above makes
 that visible within one cluster.
 
@@ -397,7 +399,8 @@ comment on the resource:
 | `snowflake_resource_monitor.cdc_wh`, `.account` | only ACCOUNTADMIN creates monitors | F14 |
 | `snowflake_warehouse.cdc` | only ACCOUNTADMIN assigns a warehouse to a monitor; the assignment lives on the warehouse resource | F14 |
 | `snowflake_grant_privileges_to_account_role` MONITOR on the two monitors → plan role | the monitors are owned by ACCOUNTADMIN | F14 |
-| Grants of `SNOWFLAKE` database roles (`USAGE_VIEWER` etc.) to `CDC_GOVERNANCE_RO` | to be confirmed against the docs at Build; if SECURITYADMIN suffices, the grant moves to that alias and leaves this list | — |
+| Grants of `SNOWFLAKE` database roles (`USAGE_VIEWER` etc.) to `CDC_GOVERNANCE_RO` | "Only users with the OWNERSHIP role can grant SNOWFLAKE database roles" (Snowflake docs, *SNOWFLAKE database roles*; confirmed at Build 2026-11-18) | — |
+| Grant of `SNOWFLAKE.BUDGET_CREATOR` to `CDC_BUDGET_ADMIN` | same rule; the budget role exists so that `budget.sql` does not run as ACCOUNTADMIN (owner decision 2026-11-18) | [`CREATE BUDGET`](https://docs.snowflake.com/en/sql-reference/classes/budget/commands/create-budget) |
 
 Any other resource on this alias is a review finding. The alias exists **only in apply**: in a PR
 plan every alias (`sysadmin`, `securityadmin`, `accountadmin`) authenticates as
@@ -410,7 +413,7 @@ so no PR plan ever runs with ACCOUNTADMIN. The `main` job's plan → apply → p
 | # | Step | Run by | Why not Terraform |
 |---|------|--------|-------------------|
 | 1 | `00_terraform_bootstrap.sql` | human, once | Terraform's own identity |
-| 2 | `budget.sql` | CI | no provider resource for custom budgets / custom actions (to re-check at Build) |
+| 2 | `budget.sql` | CI, as `CDC_BUDGET_ADMIN` (`SNOWFLAKE.BUDGET_CREATOR`, `CREATE SNOWFLAKE.CORE.BUDGET` on CONFIG, `APPLYBUDGET` and USAGE on `CDC_POC`, USAGE on the procedure — all granted by `terraform/platform`), plus `SYSADMIN` only for granting USAGE on the procedure to the `SNOWFLAKE` application; idempotent | no provider resource for custom budgets / custom actions (F13) |
 | 3 | `scripts/account_monitor.sql` — `ALTER ACCOUNT SET RESOURCE_MONITOR = <account_monitor>` | CI, after apply, idempotent | checked at Build (F12): the provider can do it only through `snowflake_current_account`, a preview resource that does not detect external changes; kept as SQL by owner decision 2026-11-18. **Future alternative:** move it to `snowflake_current_account` once that resource leaves preview. `verify_governance.sql` checks the assignment (AT-003). |
 
 `seed_config.sql` is not an exception: it inserts data, not objects. CONFIG tables move into
@@ -571,7 +574,9 @@ Plus dry run ~1 credit and idle ~0 → **~16 credits** in total, against the 25-
 
 **Validity rules:**
 - No manual use of `CDC_WH` during the windows; ad-hoc work goes to `COMPUTE_WH`, excluded from the
-  analysis.
+  analysis. The CI SQL steps (`seed_config.sql`, `budget.sql`, `verify_governance.sql`) run on
+  **`CDC_CI_WH`** (XSMALL, Gen1, 60 s, created by `terraform/platform`, owner decision 2026-11-18), also
+  excluded — so the 00:00 UTC switch merge never resumes `CDC_WH`.
 - The machine running the stack must stay awake. A gap of more than one cluster in `commits.csv`
   voids that window, which is rerun. **Recommended:** run the stack on a small cloud VM for Days 7–12.
 - Every gate task must be `started` at every check in `task_states.csv` (Decision 5); otherwise the
@@ -611,7 +616,7 @@ output, committed), and `docs/runbooks/after-trial.md` explains how to redeploy 
 | 3 | `terraform/platform/{variables,profiles}.tf`, `terraform/env/dev.tfvars` | Create | Names, `cost_profile`, limits | 2 |
 | 4 | `terraform/platform/{database,config_tables,warehouse,monitors,roles,users,grants,procedures}.tf` | Create | REQ-01/02/03; `SP_SUSPEND_GATE_TASKS` | 3 |
 | 5 | `scripts/seed_config.sql` (from `bootstrap_config.sql`) | Rename + modify | Seed only; DDL moved to 4 | 4 |
-| 6 | `scripts/budget.sql`, `scripts/account_monitor.sql` | Create | Custom budget + actions (exception 2); account-level monitor assignment (exception 3) | 4 |
+| 6 | `scripts/budget.sql`, `scripts/account_monitor.sql` (+ `CDC_BUDGET_ADMIN` and its grants in `terraform/platform`) | Create | Custom budget + action (exception 2); account-level monitor assignment (exception 3) | 4 |
 | 7 | `terraform/pipeline/{versions,providers,backend,variables,procedures,gate}.tf` | Create | Gate procedure, streams, tasks | 4, Bronze tables |
 | 8 | `scripts/streams_and_tasks.sql`, `scripts/snowflake_setup.sql`, `scripts/00_account_bootstrap.sql` | Delete | Replaced by 1–7 (git history keeps them) | 7 |
 | 9 | `scripts/verify_governance.sql` | Modify | Checks for AT-002/003/004 on the new names | 4, 7 |
@@ -901,6 +906,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 0.5 | 2026-11-17 | Christian (with Claude) | Second review (same reviewer session, not independent): suspend procedure moved to `platform` so `budget.sql` can run before `pipeline`; resume predictions written in advance — H2 expected to fail, and why; task-state check without a warehouse + validity rule; profile A without task limits (as v2); timeout derived from the dry run; read-only plan role marked unproven with fallback; domain scope clarified (all PostgreSQL — reviewer item 5 was a false positive); where the WHEN charge appears flagged for the dry run; November serverless estimate and worst case with detection delay (~84 / ~62 credits); clusters start at :30; first pipeline apply via `workflow_dispatch`; per-cluster normalization; attribution bias; simulation claims reworded until `test_gate.py` exists. |
 | 1.0 | 2026-11-18 | Christian (independent review, fresh session) | Independent sign-off (fresh session): READY FOR BUILD, no blocking issues; Build notes recorded below. |
 | 1.1 | 2026-11-18 | Christian (with Claude, Build session) | Build found that only ACCOUNTADMIN can assign a warehouse to a monitor (F14): `CDC_WH` moves to the `accountadmin` alias, recorded as a named exception limited to listed resources and never used by a PR plan (Decisions 4, 9, 11; Pattern 2). Account-level monitor stays CI SQL, `scripts/account_monitor.sql` (exception 3, owner decision; `snowflake_current_account` as future alternative — F12). F6 completed with the provider side; F11 (preview resources), F13 (no budget resource) added. Manifest items 2 and 6, Security and Risks updated. No scope change. Reviewed by the owner (diff), not by an independent session. |
+| 1.2 | 2026-11-18 | Christian (with Claude, Build session) | Items 5–6 Build, owner decisions: budget refresh `TIER_1H`; no cycle-start action; `budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role instead of ACCOUNTADMIN, so the `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list. F8 now from official docs (6.5 h default / 1 h; actual actions once a month, one retry); Decision 5/8 worst case recomputed (~1.5 credits overshoot, ~63 total). SNOWFLAKE database-role grant confirmed. New `CDC_CI_WH` for the CI SQL steps (validity rules; owner decision). Not reviewed by an independent session. |
 
 ---
 
@@ -921,8 +927,7 @@ recorded in the BUILD_REPORT.
 
 ## Next Step
 
-**Ready for:** `/sdd-build COST_GOVERNANCE items 1-4` (File Manifest items 1-4: Terraform
-identities and the platform root), resumed after the owner's review of 1.1. Build checklist items
+**Ready for:** the next `/sdd-build COST_GOVERNANCE` items (1–6 built, see the BUILD_REPORT). Build checklist items
 B1–B5 are closed during the Build on the Days listed. Probe P1 (Appendix) is run by the owner before
 the first apply (Day 3); its read-back replaces "pending" in F14.
 
