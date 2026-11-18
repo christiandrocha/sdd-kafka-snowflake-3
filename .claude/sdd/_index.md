@@ -51,6 +51,7 @@ runbooks, README with *What it actually costs*.
 | `.github/workflows/ci.yml` | Shared — serialize | — | FT-03 |
 | `Makefile`, `.env.example` | Shared — serialize | — | FT-02 (`make demo`) |
 | `README.md`, `CLAUDE.md`, `docs/adr/` | Shared — serialize | Shared — serialize | FT-02, FT-04 |
+| `.cursor/commands/`, `.claude/sdd/templates/`, `.claude/sdd/README.md`, `CONSTITUTION.md` | Process files — changed only by a Retro or an explicit process PR | | |
 
 The two features share no owned path. They can be built in parallel; shared files are touched
 one PR at a time.

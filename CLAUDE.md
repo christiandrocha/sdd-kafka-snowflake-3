@@ -18,6 +18,11 @@ v2 stays frozen as the baseline the measurements compare against.
 3. `.claude/sdd/_index.md` — active features, file ownership, plan.
 4. The folder of the feature you are working on, and the ADRs it references.
 
+Each SDD phase has a Cursor command in `.cursor/commands/` (`/sdd-status`, `/sdd-define`,
+`/sdd-design`, `/sdd-review`, `/sdd-build`, `/sdd-validate`, `/sdd-ship`, `/sdd-retro`,
+`/sdd-fasttrack`). When the user runs one, follow that file exactly; it overrides general habits.
+`/sdd-review` and `/sdd-validate` must run in a chat that has not worked on the feature.
+
 **Do not read `.claude/sdd/SDD_V3_PACKAGE.md`.** It is a generated, read-only copy for
 humans and may be stale. Always read the source files above. After changing any SDD file,
 regenerate it with `python tools/build_sdd_package.py`.

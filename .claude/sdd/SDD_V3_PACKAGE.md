@@ -47,6 +47,11 @@ v2 stays frozen as the baseline the measurements compare against.
 3. `.claude/sdd/_index.md` — active features, file ownership, plan.
 4. The folder of the feature you are working on, and the ADRs it references.
 
+Each SDD phase has a Cursor command in `.cursor/commands/` (`/sdd-status`, `/sdd-define`,
+`/sdd-design`, `/sdd-review`, `/sdd-build`, `/sdd-validate`, `/sdd-ship`, `/sdd-retro`,
+`/sdd-fasttrack`). When the user runs one, follow that file exactly; it overrides general habits.
+`/sdd-review` and `/sdd-validate` must run in a chat that has not worked on the feature.
+
 **Do not read `.claude/sdd/SDD_V3_PACKAGE.md`.** It is a generated, read-only copy for
 humans and may be stale. Always read the source files above. After changing any SDD file,
 regenerate it with `python tools/build_sdd_package.py`.
@@ -88,15 +93,21 @@ is the rules that hold in every phase; `_index.md` is the live status.
 
 #### Lifecycle
 
-| # | Phase | Artifact (in `features/<FEATURE>/`) | Exit gate |
-|---|-------|-------------------------------------|-----------|
-| 0 | Brainstorm | `BRAINSTORM_<FEATURE>.md` | A direction is chosen. *Optional for small features.* |
-| 1 | Define | `DEFINE_<FEATURE>.md` | Approved. Clarity ≥ 12/15. **Scope freezes here.** |
-| 2 | Design | `DESIGN_<FEATURE>.md` | Independent design review recorded (second opinion). |
-| 3 | Build | code + `BUILD_REPORT_<FEATURE>.md` | CI green. Every PR cites a `REQ-xx`. |
-| 4 | Validate | `VALIDATION_<FEATURE>.md` | Every acceptance test has a **measured** result, by a reviewer who did not build it. |
-| 5 | Ship | `SHIPPED_<YYYY-MM-DD>.md` | Ship gates checked; durable decisions promoted to ADRs; folder moved to `archive/`. |
-| 6 | Retro | `RETRO_<FEATURE>.md` | Its *Changes Applied* diff is merged. Part of the Ship gate. |
+| # | Phase | Cursor command | Chat | Artifact (in `features/<FEATURE>/`) | Exit gate |
+|---|-------|----------------|------|-------------------------------------|-----------|
+| 0 | Brainstorm | `/sdd-brainstorm <FEATURE> <idea>` | any | `BRAINSTORM_<FEATURE>.md` (in `backlog/`) | A direction is chosen. *Optional for small features.* |
+| 1 | Define | `/sdd-define <FEATURE>` | any | `DEFINE_<FEATURE>.md` | Approved by the owner. Clarity ≥ 12/15. **Scope freezes here.** |
+| 2 | Design | `/sdd-design <FEATURE>` | any | `DESIGN_<FEATURE>.md` | Independent review signed off → version 1.0. |
+| 2b | Review | `/sdd-review <FEATURE>` | **new**, Ask mode | — (answer only) | READY FOR BUILD. Blockers only; everything else is a Build note. |
+| 3 | Build | `/sdd-build <FEATURE> <items>` | any, Agent mode | code + `BUILD_REPORT_<FEATURE>.md` | CI green. Every PR cites a `REQ-xx`. One PR per command. |
+| 4 | Validate | `/sdd-validate <FEATURE>` | **new** | `VALIDATION_<FEATURE>.md` | Every acceptance test has evidence, by a session that did not build it. |
+| 5 | Ship | `/sdd-ship <FEATURE>` | any | `SHIPPED_<YYYY-MM-DD>.md` | Ship gates checked; durable decisions promoted to ADRs; folder moved to `archive/`. |
+| 6 | Retro | `/sdd-retro <FEATURE>` | any | `RETRO_<FEATURE>.md` | Its *Changes Applied* diff is merged. Part of the Ship gate. |
+| — | Fast track | `/sdd-fasttrack <FT-id>` | any | row in `_index.md` | One acceptance test with evidence. |
+| — | Status | `/sdd-status` | any | — (read-only) | — |
+
+The commands live in `.cursor/commands/` and are the executable form of this table: if the process
+changes, the command file changes in the same PR (the Retro checks it).
 
 Templates live in `templates/`. Brainstorms not yet promoted live in `backlog/`.
 
@@ -229,6 +240,7 @@ runbooks, README with *What it actually costs*.
 | `.github/workflows/ci.yml` | Shared — serialize | — | FT-03 |
 | `Makefile`, `.env.example` | Shared — serialize | — | FT-02 (`make demo`) |
 | `README.md`, `CLAUDE.md`, `docs/adr/` | Shared — serialize | Shared — serialize | FT-02, FT-04 |
+| `.cursor/commands/`, `.claude/sdd/templates/`, `.claude/sdd/README.md`, `CONSTITUTION.md` | Process files — changed only by a Retro or an explicit process PR | | |
 
 The two features share no owned path. They can be built in parallel; shared files are touched
 one PR at a time.
