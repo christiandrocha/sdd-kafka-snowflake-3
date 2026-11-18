@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–9 merged (#1–#3); 16–18 built (PR pending); 15 with the owner; DESIGN 1.3 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Build — items 1–9 merged (#1–#3); 16–18 (#4) and 10–13 (stacked) in review; 14 next; 15 with the owner; DESIGN 1.4 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -36,7 +36,7 @@ runbooks, README with *What it actually costs*.
 |------|-----------------|------------------|-------------|
 | `terraform/` | **Owns** | — | FT-03 reads |
 | `scripts/streams_and_tasks.sql`, `scripts/*.sql` | **Owns** | — | — |
-| `dagster/pipeline/sensors.py`, `jobs.py`, `gate.py` | **Owns** | — | — |
+| `dagster/pipeline/sensors.py`, `jobs.py`, `gate.py`, `assets.py` | **Owns** | — | — |
 | `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py` | **Owns** | — | — |
 | `terraform/env/dev.tfvars` | **Owns** | — | — |
 | `tests/load/`, `docs/measurement/` | **Owns** | Reads | — |
