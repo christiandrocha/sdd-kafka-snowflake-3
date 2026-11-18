@@ -186,4 +186,4 @@ other domain can follow when a business need appears.
 
 ## Next Step
 
-**Ready for:** `/design .claude/sdd/features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md` — after approval.
+**Ready for:** `/sdd-design SCD2_RESTAURANTS`

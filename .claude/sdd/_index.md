@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Design — draft 0.5 (two review rounds applied); awaiting independent sign-off | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Build — DESIGN 1.0 signed off 2026-11-18 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -83,7 +83,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 2 | ~~Credit budget for the A/B measurement~~ — resolved: 25 credits on the `CDC_WH` monitor (owner decision) | Resolved | — |
 | 6 | ~~Trial end date and balance~~ — resolved: 2026-12-17, USD 400 | Resolved | — |
 | 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (Day 3) | Lower the limits if 60 credits > 50% of the balance |
-| 3 | Repository name | No | `sdd-kafka-snowflake-3` |
+| 3 | ~~Repository name~~ — resolved: repository `sdd-kafka-snowflake-3` created 2026-11-17 | Resolved | — |
 | 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | ~~Terraform state backend~~ — resolved: S3 with native lockfile, no DynamoDB (DESIGN Decision 12) | Resolved | — |
 

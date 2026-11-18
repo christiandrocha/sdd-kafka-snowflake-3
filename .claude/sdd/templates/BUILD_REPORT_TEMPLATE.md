@@ -154,7 +154,7 @@
 - [ ] All tests pass
 - [ ] No blocking issues
 - [ ] Acceptance tests verified
-- [ ] Ready for /validate (independent reviewer, fresh context)
+- [ ] Ready for `/sdd-validate {FEATURE_NAME}` (independent reviewer, fresh context)
 
 ---
 
@@ -164,4 +164,4 @@
 
 **If Blocked:** Resolve blockers, then `/sdd-build {FEATURE_NAME} <items>` to resume
 
-**If Issues Found:** `/iterate DESIGN_{FEATURE}.md "{change needed}"`
+**If Issues Found:** update `DESIGN_{FEATURE_NAME}.md` (new revision), then `/sdd-build {FEATURE_NAME} <items>`

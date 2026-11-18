@@ -11,7 +11,7 @@
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | Draft 0.5 — second review applied; awaiting an independent sign-off (fresh session) |
+| **Status** | 1.0 — Ready for Build (independent review 2026-11-18) |
 
 ---
 
@@ -24,7 +24,7 @@
 | F3 | "A nominal charge accrues each time a task evaluates its `WHEN` condition and does not run." | Snowflake docs, `ALTER TASK` | v2's "a false `WHEN` costs nothing" is approximate; measured in the idle window (Decision 10). **Which view records it** (`SERVERLESS_TASK_HISTORY` or cloud services in `METERING_HISTORY`) is not documented: the dry run checks both, so the idle criterion cannot read zero by construction. |
 | F4 | Serverless compute billed per second, rounded up; serverless tasks at a 0.9 multiplier per third-party readings of the consumption table; no minimum stated on the tasks page. | Snowflake *Understanding compute cost*; select.dev, getorchestra | A-003 partially validated; the A/B settles it. |
 | F5 | Bronze tables are created by the Kafka connector (`enable.schematization=true`). Streams need existing tables. | v2 connector config, v2 `deploy.yml` order | Two Terraform roots (Decision 1). |
-| F6 | `RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. | Live probe on `GWHUBCF-QQ53235` | DEFINE 1.1 REQ-02. |
+| F6 | `RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. Read-back: after `CREATE WAREHOUSE … GENERATION = '1'`, `SHOW WAREHOUSES` returned `resource_constraint = STANDARD_GEN_1` and `generation = 1` (the constraint is rejected on write but reported on read). | Live probe on `GWHUBCF-QQ53235`, 2026-11-17 | DEFINE 1.1 REQ-02; AT-002 output format (Build checklist B4). |
 | F7 | Budgets can call a **stored procedure** when actual or projected spend reaches a threshold (custom actions), and another one when the cycle restarts. A custom budget that contains a database monitors the serverless tasks in it. | Snowflake docs, *Custom actions for budgets*; release notes 2025-12-10 and 2026-02-24; *Budgets* | An automatic action that suspends the gate tasks is possible (Decision 5). |
 | F8 | Budget spend data refreshes with a delay: up to ~8 h on the standard tier, ~1 h on a faster tier. | third-party guide (Medium); to confirm in docs at Build | The budget action is a backstop, not a fast brake. |
 | F9 | A resource monitor with `FREQUENCY = NEVER` never resets its used credits. | Snowflake docs, `CREATE RESOURCE MONITOR` | Monitors sized for the whole trial, not per calendar month (Decision 8). |
@@ -865,13 +865,29 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 0.1 | 2026-11-17 | Christian (with Claude) | Initial draft |
 | 0.2 | 2026-11-17 | Christian (with Claude) | Self-review: Decision 6 rewritten (two resumes per burst); requirement coverage added |
 | 0.3 | 2026-11-17 | Christian (with Claude) | Simulation found starvation under continuous traffic; starvation guard added |
-| 0.5 | 2026-11-17 | Christian (with Claude) | Second review (same reviewer session, not independent): suspend procedure moved to `platform` so `budget.sql` can run before `pipeline`; resume predictions written in advance — H2 expected to fail, and why; task-state check without a warehouse + validity rule; profile A without task limits (as v2); timeout derived from the dry run; read-only plan role marked unproven with fallback; domain scope clarified (all PostgreSQL — reviewer item 5 was a false positive); where the WHEN charge appears flagged for the dry run; November serverless estimate and worst case with detection delay (~84 / ~62 credits); clusters start at :30; first pipeline apply via `workflow_dispatch`; per-cluster normalization; attribution bias; simulation claims reworded until `test_gate.py` exists. |
 | 0.4 | 2026-11-17 | Christian (with Claude) | Applied external review (4 blocking, 8 adjustments, minors): clustered load that exercises the window; idle window; switches at 00:00 UTC via versioned `tfvars`; plan identity + pipeline-plan skip (Decisions 11); causal freshness (Decision 7); attribution method (Decision 13); budget custom action + timeout 10 s with worst case stated (Decision 5); monitors `NEVER` (Decision 8); honest exception list and CONFIG tables in Terraform (Decision 9); S3 native lock (Decision 12); QA deviation recorded (F10); no dbt changes (Decision 3); after-trial plan. Owner decisions: 25-credit cap, automatic action, QA off in both, no `sources.yml` change. |
+| 0.5 | 2026-11-17 | Christian (with Claude) | Second review (same reviewer session, not independent): suspend procedure moved to `platform` so `budget.sql` can run before `pipeline`; resume predictions written in advance — H2 expected to fail, and why; task-state check without a warehouse + validity rule; profile A without task limits (as v2); timeout derived from the dry run; read-only plan role marked unproven with fallback; domain scope clarified (all PostgreSQL — reviewer item 5 was a false positive); where the WHEN charge appears flagged for the dry run; November serverless estimate and worst case with detection delay (~84 / ~62 credits); clusters start at :30; first pipeline apply via `workflow_dispatch`; per-cluster normalization; attribution bias; simulation claims reworded until `test_gate.py` exists. |
+| 1.0 | 2026-11-18 | Christian (independent review, fresh session) | Independent sign-off (fresh session): READY FOR BUILD, no blocking issues; Build notes recorded below. |
+
+---
+
+## Build checklist (from the independent review)
+
+Non-blocking items from the 2026-11-18 independent review. Each must be closed by the Day shown and
+recorded in the BUILD_REPORT.
+
+| # | Close by | Item |
+|---|----------|------|
+| B1 | Day 3 | The `main` job applies both roots (`pipeline` only once Bronze exists). Both read `cost_profile` from the same `terraform/env/dev.tfvars`. The `pipeline` root gets its own `profiles.tf` (or a shared module) so `local.profile` exists there. Run `verify_governance.sql` after every profile switch — a switch that applied only one root voids the window. |
+| B2 | Day 5 | Check in the official docs whether a task timeout counts toward `suspend_task_after_num_failures`, and recompute the Decision 5/8 worst case accordingly. Confirm that budgets and custom actions are available on a trial account, and the real refresh delay (F8 is secondary-sourced). If budgets are unavailable, state that the ceiling is timeout + failure limit + task-state check. |
+| B3 | Day 3 | Source the Gen2 rate of 1.35 credits/h from Snowflake's consumption table, or derive it from window A's metering (credits ÷ billed hours) — and say which. |
+| B4 | Day 3 | AT-002 format — already confirmed by the 2026-11-17 probe (see F6); align `verify_governance.sql` with that output. |
+| B5 | Before the Day 7 dry run | `PROTOCOL.md` states which window may be rerun, how the monitor quota is raised by PR, and the last date a rerun still fits. `budget.sql` must be idempotent (it runs on every push to `main`). |
 
 ---
 
 ## Next Step
 
-Independent sign-off in a **fresh** session (DEFINE 1.4 + this file), scoped to blockers only: anything
-not blocking goes to the Build notes instead of another review round.
-Then **Ready for:** `/sdd-build COST_GOVERNANCE <items>`
+**Ready for:** `/sdd-build COST_GOVERNANCE items 1-4` (File Manifest items 1-4: Terraform
+identities and the platform root). Build checklist items B1–B5 are closed during the Build on
+the Days listed.

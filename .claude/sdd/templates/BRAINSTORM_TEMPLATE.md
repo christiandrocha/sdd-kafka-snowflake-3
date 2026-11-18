@@ -149,7 +149,7 @@
 
 ---
 
-## Suggested Requirements for /define
+## Suggested Requirements for /sdd-define
 
 Based on this brainstorm session, the following should be captured in the DEFINE phase:
 
