@@ -11,7 +11,7 @@
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | 1.0 — Ready for Build (independent review 2026-11-18) |
+| **Status** | 1.1 — Ready for Build (owner review of the 1.0 → 1.1 diff, 2026-11-18; 1.0 signed off by independent review 2026-11-18) |
 
 ---
 
@@ -24,11 +24,15 @@
 | F3 | "A nominal charge accrues each time a task evaluates its `WHEN` condition and does not run." | Snowflake docs, `ALTER TASK` | v2's "a false `WHEN` costs nothing" is approximate; measured in the idle window (Decision 10). **Which view records it** (`SERVERLESS_TASK_HISTORY` or cloud services in `METERING_HISTORY`) is not documented: the dry run checks both, so the idle criterion cannot read zero by construction. |
 | F4 | Serverless compute billed per second, rounded up; serverless tasks at a 0.9 multiplier per third-party readings of the consumption table; no minimum stated on the tasks page. | Snowflake *Understanding compute cost*; select.dev, getorchestra | A-003 partially validated; the A/B settles it. |
 | F5 | Bronze tables are created by the Kafka connector (`enable.schematization=true`). Streams need existing tables. | v2 connector config, v2 `deploy.yml` order | Two Terraform roots (Decision 1). |
-| F6 | `RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. Read-back: after `CREATE WAREHOUSE … GENERATION = '1'`, `SHOW WAREHOUSES` returned `resource_constraint = STANDARD_GEN_1` and `generation = 1` (the constraint is rejected on write but reported on read). | Live probe on `GWHUBCF-QQ53235`, 2026-11-17 | DEFINE 1.1 REQ-02; AT-002 output format (Build checklist B4). |
+| F6 | `RESOURCE_CONSTRAINT = 'STANDARD_GEN_1'` is rejected on this account; `GENERATION = '1'` works. New warehouses default to Gen2 with query acceleration on. Read-back: after `CREATE WAREHOUSE … GENERATION = '1'`, `SHOW WAREHOUSES` returned `resource_constraint = STANDARD_GEN_1` and `generation = 1` (the constraint is rejected on write but reported on read). Provider side (2.23.0 schema, read 2026-11-18): `snowflake_warehouse.generation` accepts `1` \| `2`; `resource_constraint` is documented as "only available for snowpark-optimized warehouses. For setting generation please use the `generation` field" — so the config sets `generation` only and never `resource_constraint`. | Live probe on `GWHUBCF-QQ53235`, 2026-11-17; provider schema 2.23.0 (`terraform providers schema -json`), 2026-11-18 | DEFINE 1.1 REQ-02; AT-002 output format (Build checklist B4); Decision 4 sets `generation` only. |
 | F7 | Budgets can call a **stored procedure** when actual or projected spend reaches a threshold (custom actions), and another one when the cycle restarts. A custom budget that contains a database monitors the serverless tasks in it. | Snowflake docs, *Custom actions for budgets*; release notes 2025-12-10 and 2026-02-24; *Budgets* | An automatic action that suspends the gate tasks is possible (Decision 5). |
 | F8 | Budget spend data refreshes with a delay: up to ~8 h on the standard tier, ~1 h on a faster tier. | third-party guide (Medium); to confirm in docs at Build | The budget action is a backstop, not a fast brake. |
 | F9 | A resource monitor with `FREQUENCY = NEVER` never resets its used credits. | Snowflake docs, `CREATE RESOURCE MONITOR` | Monitors sized for the whole trial, not per calendar month (Decision 8). |
 | F10 | v2's `CDC_WH` had query acceleration **on** (scale factor 2), read on 2026-08-11; it never engaged in 30 days. `00_account_bootstrap.sql` says `FALSE`, but `CREATE … IF NOT EXISTS` never altered the existing warehouse. | v2 README *Cost governance*, `scripts/snowflake_setup.sql` | Profile A deviates from v2 on this one setting, by owner decision (see Cost profiles). |
+| F11 | The latest provider is **2.23.0**. `snowflake_table`, `snowflake_procedure_sql` and `snowflake_current_account` are **preview features**: they must be listed in the provider's `preview_features_enabled`, and "may have breaking changes in future releases, even without raising the major version". | provider schema 2.23.0, `preview_features_enabled` description (read 2026-11-18) | `terraform/platform` enables exactly `snowflake_table_resource` and `snowflake_procedure_sql_resource`; the exact provider version is pinned in `.terraform.lock.hcl` (Decision 4) and upgraded only by PR. Risk added. |
+| F12 | `snowflake_current_account` can set the account-level monitor (`resource_monitor`), but it is a preview resource and "external changes for this field won't be detected". | provider schema 2.23.0 (read 2026-11-18) | **Not used** (owner decision 2026-11-18): exception 3 stays as CI SQL (Decision 9). Recorded as a future alternative once the resource leaves preview. |
+| F13 | The provider has **no resource for budgets or budget custom actions** (154 resources in 2.23.0, none for budgets). | provider schema 2.23.0 (read 2026-11-18) | Exception 2 (`budget.sql`) confirmed. |
+| F14 | "Only users with the ACCOUNTADMIN role can create a resource monitor", "… can **assign warehouses** to resource monitors" and "… can set a resource monitor to monitor the account". A role with **MONITOR or MODIFY** on a monitor can see it in `SHOW RESOURCE MONITORS`. The provider's `snowflake_warehouse.resource_monitor` is a plain optional field (not computed), so an assignment made outside the warehouse resource shows as a diff on every plan. **Probe P1 (Appendix) — pending, run by the owner;** expected read-back in the F6 format: as `SYSADMIN`, `ALTER WAREHOUSE … SET RESOURCE_MONITOR` and `CREATE WAREHOUSE … RESOURCE_MONITOR =` fail with insufficient privileges; as `ACCOUNTADMIN` the `ALTER` succeeds and `SHOW WAREHOUSES` returns the monitor in `resource_monitor`. | Snowflake docs, [*Working with resource monitors* — Assigning warehouses to a resource monitor](https://docs.snowflake.com/en/user-guide/resource-monitors#assigning-warehouses-to-a-resource-monitor) and [Setting a resource monitor for your account](https://docs.snowflake.com/en/user-guide/resource-monitors#setting-a-resource-monitor-for-your-account); [`ALTER WAREHOUSE`, access control](https://docs.snowflake.com/en/sql-reference/sql/alter-warehouse) (read 2026-11-18); provider schema 2.23.0 | Pattern 2 as written in 1.0 (`provider = snowflake.sysadmin` with `resource_monitor`) cannot apply. `CDC_WH` is created by the `accountadmin` alias — a named exception in Decision 9. The read-only plan role gets MONITOR on both monitors (Decision 9). |
 
 ---
 
@@ -46,8 +50,9 @@
                                          CONFIG.SP_SUSPEND_GATE_TASKS (called by the budget)
                                          monitors: CDC_WH + account (FREQUENCY = NEVER)
           │
-          ▼  scripts/seed_config.sql (CI step): TABLE_METADATA seed — data, not objects
-          ▼  scripts/budget.sql      (CI step): custom budget on CDC_POC + custom action (exception)
+          ▼  scripts/seed_config.sql     (CI step): TABLE_METADATA seed — data, not objects
+          ▼  scripts/account_monitor.sql (CI step): ALTER ACCOUNT SET RESOURCE_MONITOR (exception 3)
+          ▼  scripts/budget.sql          (CI step): custom budget on CDC_POC + custom action (exception 2)
           │
    [ stack up · connectors registered · first CDC rows land → Bronze tables exist ]   ← F5
           │
@@ -93,7 +98,8 @@ AT-002 (generation 1) is verified in profile B; in profile A it fails by constru
 | `terraform/env/dev.tfvars` | The only place `cost_profile` and limits are set; changed by PR | HCL |
 | `scripts/00_terraform_bootstrap.sql` | One-time manual step: Terraform identities (Decision 9) | SQL, run once as `ACCOUNTADMIN` |
 | `scripts/seed_config.sql` | `TABLE_METADATA` seed (renamed from `bootstrap_config.sql`, DDL moved to Terraform) | SQL, CI step |
-| `scripts/budget.sql` | Custom budget on `CDC_POC`, limit, refresh tier, custom action + cycle-start action | SQL, CI step (exception) |
+| `scripts/account_monitor.sql` | Assigns the Terraform-created `account_monitor` to the account; idempotent | SQL, CI step (exception 3) |
+| `scripts/budget.sql` | Custom budget on `CDC_POC`, limit, refresh tier, custom action + cycle-start action | SQL, CI step (exception 2) |
 | `scripts/verify_governance.sql` | Read-only account checks for AT-002/003/004 | SQL |
 | `dagster/pipeline/gate.py` | Pure decision function for the sensor | Python |
 | `dagster/pipeline/sensors.py`, `jobs.py` | Sensor uses `gate.decide`; job records the consumed `run_key` | Python, Dagster |
@@ -193,12 +199,16 @@ removes parallel copies. The DEFINE forbids dbt changes in this feature.
 
 **Choice:** `generation = local.profile.generation`, `enable_query_acceleration = false`,
 `warehouse_size = "XSMALL"`, `auto_suspend = 60`, `auto_resume = true`, `initially_suspended = true`,
-`resource_monitor = <cdc_wh monitor>`. Provider `>= 2.7.0, < 3.0.0`, exact version in
-`.terraform.lock.hcl`.
+`resource_monitor = <cdc_wh monitor>`, created by the **`accountadmin` provider alias** — only
+ACCOUNTADMIN can assign a warehouse to a monitor (F14), and assigning it outside the resource would
+show as a permanent diff. `resource_constraint` is never set (F6). Provider `>= 2.7.0, < 3.0.0`, exact
+version in `.terraform.lock.hcl` (2.23.0 at Build; F11).
 
 **Consequences:** the provider reads generation back through `resource_constraint` for standard
 warehouses; the Build confirms a clean second `plan` (AT-001). Drift, if any, is documented — never
-hidden with `ignore_changes`.
+hidden with `ignore_changes`. `CDC_WH` is **owned by ACCOUNTADMIN**, not SYSADMIN (owner decision
+2026-11-18): `CDC_ROLE` and `CDC_ROLE_RO` keep only USAGE/OPERATE, and the README lists it with the
+other ACCOUNTADMIN-owned objects (Decision 9).
 
 ---
 
@@ -376,6 +386,24 @@ that visible within one cluster.
   not be enough for `DESCRIBE USER`, `SHOW GRANTS` or the account monitor. Validated on Day 3; fallback:
   grant the specific read privileges that fail, and if a refresh still needs `ACCOUNTADMIN`, PR plans
   use `-refresh=false` for those resources and the full refresh runs only in the `main` job.
+  Monitors are covered by F14: Terraform grants the plan role MONITOR on both monitors.
+
+**Named exception — the `accountadmin` provider alias (owner decision 2026-11-18).** The alias is
+used **only** by resources that cannot be applied with a lesser role, each one listed here and in a
+comment on the resource:
+
+| Resource | Why ACCOUNTADMIN | Source |
+|----------|------------------|--------|
+| `snowflake_resource_monitor.cdc_wh`, `.account` | only ACCOUNTADMIN creates monitors | F14 |
+| `snowflake_warehouse.cdc` | only ACCOUNTADMIN assigns a warehouse to a monitor; the assignment lives on the warehouse resource | F14 |
+| `snowflake_grant_privileges_to_account_role` MONITOR on the two monitors → plan role | the monitors are owned by ACCOUNTADMIN | F14 |
+| Grants of `SNOWFLAKE` database roles (`USAGE_VIEWER` etc.) to `CDC_GOVERNANCE_RO` | to be confirmed against the docs at Build; if SECURITYADMIN suffices, the grant moves to that alias and leaves this list | — |
+
+Any other resource on this alias is a review finding. The alias exists **only in apply**: in a PR
+plan every alias (`sysadmin`, `securityadmin`, `accountadmin`) authenticates as
+`TERRAFORM_PLAN_SVC` with role `TERRAFORM_PLAN_ROLE` (`var.plan_role`, set only by the PR plan job),
+so no PR plan ever runs with ACCOUNTADMIN. The `main` job's plan → apply → plan sequence uses
+`TERRAFORM_SVC` with the role per alias.
 
 **Exceptions to REQ-01 ("nothing created by hand"), all versioned and listed in the README:**
 
@@ -383,7 +411,7 @@ that visible within one cluster.
 |---|------|--------|-------------------|
 | 1 | `00_terraform_bootstrap.sql` | human, once | Terraform's own identity |
 | 2 | `budget.sql` | CI | no provider resource for custom budgets / custom actions (to re-check at Build) |
-| 3 | `ALTER ACCOUNT SET RESOURCE_MONITOR` | CI, only if the provider cannot assign an account-level monitor | to be checked at Build |
+| 3 | `scripts/account_monitor.sql` — `ALTER ACCOUNT SET RESOURCE_MONITOR = <account_monitor>` | CI, after apply, idempotent | checked at Build (F12): the provider can do it only through `snowflake_current_account`, a preview resource that does not detect external changes; kept as SQL by owner decision 2026-11-18. **Future alternative:** move it to `snowflake_current_account` once that resource leaves preview. `verify_governance.sql` checks the assignment (AT-003). |
 
 `seed_config.sql` is not an exception: it inserts data, not objects. CONFIG tables move into
 `terraform/platform` as `snowflake_table` resources — their schema is ours and static, unlike Bronze.
@@ -415,12 +443,13 @@ means no plan (review finding 4). The repo is public.
 
 **Choice:** `terraform.yml` jobs:
 1. **PR from the same repo:** `fmt -check`, `validate`, `plan` for both roots in environment
-   `snowflake-plan` (`TERRAFORM_PLAN_SVC`), plan posted as a PR comment; `pipeline` plan skipped with
-   a notice while Bronze does not exist.
+   `snowflake-plan` (`TERRAFORM_PLAN_SVC`, `TF_VAR_plan_role = TERRAFORM_PLAN_ROLE` so every provider
+   alias uses the read-only role — Decision 9), plan posted as a PR comment; `pipeline` plan skipped
+   with a notice while Bronze does not exist.
 2. **PR from a fork:** `fmt -check` + `validate` only (no secrets are exposed to forks).
 3. **Push to `main`:** plan, then apply in environment `snowflake-dev` (`TERRAFORM_SVC`, required
-   reviewer), then a second plan that must show no changes (AT-001), then `seed_config.sql` and
-   `budget.sql`.
+   reviewer), then a second plan that must show no changes (AT-001), then `seed_config.sql`,
+   `account_monitor.sql` and `budget.sql`.
 
 4. **`workflow_dispatch` ("apply pipeline"):** the first `pipeline` apply, run by hand from the
    Actions tab once the Bronze tables exist, through the same `snowflake-dev` approval. Later
@@ -478,7 +507,7 @@ measured.
 |-----|-----------------|-------------|
 | REQ-01 | `terraform/platform`, `terraform/pipeline`; exceptions listed (Decision 9) | AT-001 |
 | REQ-02 | `warehouse.tf` (Decision 4), profile B | AT-002 |
-| REQ-03 | `monitors.tf` + `budget.sql` (Decisions 5, 8) | AT-003 |
+| REQ-03 | `monitors.tf` + `account_monitor.sql` + `budget.sql` (Decisions 5, 8, 9) | AT-003 |
 | REQ-04 | `terraform/pipeline/gate.tf` (Decision 5) | AT-004 |
 | REQ-05 | `gate.py` + `sensors.py` (Decision 6) | AT-005, AT-006 |
 | REQ-06 | `tests/load/generate_load.py` | AT-007 |
@@ -578,11 +607,11 @@ output, committed), and `docs/runbooks/after-trial.md` explains how to redeploy 
 | # | File | Action | Purpose | Dependencies |
 |---|------|--------|---------|--------------|
 | 1 | `scripts/00_terraform_bootstrap.sql` | Create | Terraform identities (Decision 9) | — |
-| 2 | `terraform/platform/{versions,providers,backend}.tf` | Create | Provider pin, role aliases, S3 state | 1 |
+| 2 | `terraform/platform/{versions,providers,backend}.tf` | Create | Provider pin, role aliases (`plan_role` override), preview features (F11), S3 state | 1 |
 | 3 | `terraform/platform/{variables,profiles}.tf`, `terraform/env/dev.tfvars` | Create | Names, `cost_profile`, limits | 2 |
 | 4 | `terraform/platform/{database,config_tables,warehouse,monitors,roles,users,grants,procedures}.tf` | Create | REQ-01/02/03; `SP_SUSPEND_GATE_TASKS` | 3 |
 | 5 | `scripts/seed_config.sql` (from `bootstrap_config.sql`) | Rename + modify | Seed only; DDL moved to 4 | 4 |
-| 6 | `scripts/budget.sql` | Create | Custom budget + actions (exception 2) | 4 |
+| 6 | `scripts/budget.sql`, `scripts/account_monitor.sql` | Create | Custom budget + actions (exception 2); account-level monitor assignment (exception 3) | 4 |
 | 7 | `terraform/pipeline/{versions,providers,backend,variables,procedures,gate}.tf` | Create | Gate procedure, streams, tasks | 4, Bronze tables |
 | 8 | `scripts/streams_and_tasks.sql`, `scripts/snowflake_setup.sql`, `scripts/00_account_bootstrap.sql` | Delete | Replaced by 1–7 (git history keeps them) | 7 |
 | 9 | `scripts/verify_governance.sql` | Modify | Checks for AT-002/003/004 on the new names | 4, 7 |
@@ -658,7 +687,7 @@ locals {
 ```hcl
 # terraform/platform/warehouse.tf — attribute names checked against provider docs at Build
 resource "snowflake_warehouse" "cdc" {
-  provider                  = snowflake.sysadmin
+  provider                  = snowflake.accountadmin # named exception, Decision 9 (F14)
   name                      = var.warehouse_name
   warehouse_size            = "XSMALL"
   generation                = local.profile.generation
@@ -828,6 +857,8 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 - `TERRAFORM_SVC` (apply, incl. `ACCOUNTADMIN`) exists only in the reviewer-protected `snowflake-dev`
   environment and on the owner's machine. Agents and PR plans use `TERRAFORM_PLAN_SVC` (read-only).
+- The `accountadmin` provider alias is limited to the resources named in Decision 9 and is never used
+  by a PR plan. `CDC_WH` and both monitors are owned by ACCOUNTADMIN.
 - Environment secrets are not exposed to fork PRs; the repo is public.
 - Service users' public keys are variables; private keys never enter Terraform state.
 - The suspend procedure called by the budget is granted to the `SNOWFLAKE` application with the
@@ -851,6 +882,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | Laptop sleeps during ~100 h of windows | **High** | High | Cloud VM for Days 7–12, or sleep disabled; gap detection; rerun |
 | Provider lacks budget / account-monitor support | Medium | Low | Exceptions 2–3 (Decision 9) |
 | `snowflake_task` field combinations differ from Pattern 3 | Medium | Low | Pattern is a sketch; Build reads the resource docs first |
+| Preview resources (`snowflake_table`, `snowflake_procedure_sql`) change behaviour in a minor release (F11) | Low | Medium | Exact version in `.terraform.lock.hcl`; upgrades only by PR with a clean plan |
 | Budget refresh delay larger than assumed | Medium | Medium | Timeout bound holds regardless; worst case written in Decision 5 |
 | Dagster job start > 60 s after the sensor's query → two resumes per run | Medium | Low | Measured in the dry run; reported as is |
 | Estimate biases the reading | Medium | Medium | Estimate written before measuring; Validator is a fresh session |
@@ -868,6 +900,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 0.4 | 2026-11-17 | Christian (with Claude) | Applied external review (4 blocking, 8 adjustments, minors): clustered load that exercises the window; idle window; switches at 00:00 UTC via versioned `tfvars`; plan identity + pipeline-plan skip (Decisions 11); causal freshness (Decision 7); attribution method (Decision 13); budget custom action + timeout 10 s with worst case stated (Decision 5); monitors `NEVER` (Decision 8); honest exception list and CONFIG tables in Terraform (Decision 9); S3 native lock (Decision 12); QA deviation recorded (F10); no dbt changes (Decision 3); after-trial plan. Owner decisions: 25-credit cap, automatic action, QA off in both, no `sources.yml` change. |
 | 0.5 | 2026-11-17 | Christian (with Claude) | Second review (same reviewer session, not independent): suspend procedure moved to `platform` so `budget.sql` can run before `pipeline`; resume predictions written in advance — H2 expected to fail, and why; task-state check without a warehouse + validity rule; profile A without task limits (as v2); timeout derived from the dry run; read-only plan role marked unproven with fallback; domain scope clarified (all PostgreSQL — reviewer item 5 was a false positive); where the WHEN charge appears flagged for the dry run; November serverless estimate and worst case with detection delay (~84 / ~62 credits); clusters start at :30; first pipeline apply via `workflow_dispatch`; per-cluster normalization; attribution bias; simulation claims reworded until `test_gate.py` exists. |
 | 1.0 | 2026-11-18 | Christian (independent review, fresh session) | Independent sign-off (fresh session): READY FOR BUILD, no blocking issues; Build notes recorded below. |
+| 1.1 | 2026-11-18 | Christian (with Claude, Build session) | Build found that only ACCOUNTADMIN can assign a warehouse to a monitor (F14): `CDC_WH` moves to the `accountadmin` alias, recorded as a named exception limited to listed resources and never used by a PR plan (Decisions 4, 9, 11; Pattern 2). Account-level monitor stays CI SQL, `scripts/account_monitor.sql` (exception 3, owner decision; `snowflake_current_account` as future alternative — F12). F6 completed with the provider side; F11 (preview resources), F13 (no budget resource) added. Manifest items 2 and 6, Security and Risks updated. No scope change. Reviewed by the owner (diff), not by an independent session. |
 
 ---
 
@@ -889,5 +922,37 @@ recorded in the BUILD_REPORT.
 ## Next Step
 
 **Ready for:** `/sdd-build COST_GOVERNANCE items 1-4` (File Manifest items 1-4: Terraform
-identities and the platform root). Build checklist items B1–B5 are closed during the Build on
-the Days listed.
+identities and the platform root), resumed after the owner's review of 1.1. Build checklist items
+B1–B5 are closed during the Build on the Days listed. Probe P1 (Appendix) is run by the owner before
+the first apply (Day 3); its read-back replaces "pending" in F14.
+
+---
+
+## Appendix — Probe P1 (F14), run by the owner
+
+Run by a human in Snowsight before the first apply. Agents never run it (Constitution R1). Creates
+two throwaway objects that cost nothing while suspended. Record each statement's result in F14 in the
+F6 format (statement → error or success → `SHOW` read-back).
+
+```sql
+USE ROLE ACCOUNTADMIN;
+CREATE RESOURCE MONITOR PROBE_RM_P1 WITH CREDIT_QUOTA = 1 FREQUENCY = NEVER START_TIMESTAMP = IMMEDIATELY;
+
+USE ROLE SYSADMIN;
+CREATE WAREHOUSE PROBE_WH_P1 WAREHOUSE_SIZE = XSMALL GENERATION = '1'
+    AUTO_SUSPEND = 60 INITIALLY_SUSPENDED = TRUE;
+-- P1.1 expected: insufficient privileges
+ALTER WAREHOUSE PROBE_WH_P1 SET RESOURCE_MONITOR = PROBE_RM_P1;
+-- P1.2 expected: insufficient privileges (the provider may set the monitor at CREATE time)
+CREATE WAREHOUSE PROBE_WH_P1B WAREHOUSE_SIZE = XSMALL GENERATION = '1'
+    INITIALLY_SUSPENDED = TRUE RESOURCE_MONITOR = PROBE_RM_P1;
+
+USE ROLE ACCOUNTADMIN;
+-- P1.3 expected: success
+ALTER WAREHOUSE PROBE_WH_P1 SET RESOURCE_MONITOR = PROBE_RM_P1;
+-- P1.4 read-back: resource_monitor = PROBE_RM_P1
+SHOW WAREHOUSES LIKE 'PROBE_WH_P1%';
+
+-- Cleanup (human): DROP WAREHOUSE IF EXISTS PROBE_WH_P1; DROP WAREHOUSE IF EXISTS PROBE_WH_P1B;
+--                  DROP RESOURCE MONITOR IF EXISTS PROBE_RM_P1;
+```

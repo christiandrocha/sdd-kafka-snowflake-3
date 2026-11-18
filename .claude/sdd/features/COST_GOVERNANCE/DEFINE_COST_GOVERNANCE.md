@@ -10,7 +10,7 @@
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Approved — ready for Design |
+| **Status** | Approved (1.4) — in Build (DESIGN 1.1) |
 | **Clarity Score** | 13/15 |
 | **Approved by** | Christian, 2026-11-17 |
 
@@ -213,4 +213,4 @@ its method. The README states the number we got, not the number we hoped for.
 
 ## Next Step
 
-**In Design:** see `DESIGN_COST_GOVERNANCE.md`.
+**In Build:** see `DESIGN_COST_GOVERNANCE.md` (1.1) and `BUILD_REPORT_COST_GOVERNANCE.md`.

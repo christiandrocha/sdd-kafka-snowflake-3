@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — DESIGN 1.0 signed off 2026-11-18 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Build — items 1–4 in progress; DESIGN 1.1 Ready for Build (owner-reviewed 2026-11-18) | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -64,7 +64,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
 |-----|-----------------|------------------|-------------|
 | 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). ✅ Both DEFINEs approved. ✅ Trial ends Dec 17. | — | — |
-| 2 | DESIGN + second-opinion review | — | FT-04 |
+| 2 | ~~DESIGN + second-opinion review~~ — done on Day 1 (DESIGN 1.0 signed off 2026-11-18). Build items 1–4 started on Day 1; DESIGN 1.1 from the Build (F14). | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | DESIGN + review | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Build: fixture of restaurant changes, `scd2` strategy | FT-03 |
 | 7 | Dry run of the measurement protocol (½ day of each config) | Build: history model, current-state reconciliation, Gold consumer, contract, tests | — |

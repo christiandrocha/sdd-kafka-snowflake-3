@@ -82,3 +82,11 @@ docs/*
 !.cursor/rules/
 !.cursor/skills/
 AGENTS.md
+
+# Terraform — providers and local state are never committed;
+# .terraform.lock.hcl is (exact provider version, DESIGN_COST_GOVERNANCE F11).
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

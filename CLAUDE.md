@@ -44,7 +44,10 @@ regenerate it with `python tools/build_sdd_package.py`.
 |------|-------|
 | Snowflake account | `GWHUBCF-QQ53235` (org `GWHUBCF`, locator `KT15332`) — **trial**, created 2026-11-17. Not the v2 account. |
 | Snowflake region | AWS `sa-east-1` (São Paulo) |
-| Objects | suffixed `_V3` (e.g. `CDC_WH_V3`) so the A/B config A can coexist — confirm in COST_GOVERNANCE design |
+| Objects | v2 names, no suffix: `CDC_POC`, `CDC_WH`, `CDC_ROLE`, `CDC_ROLE_RO` (Terraform variable defaults; COST_GOVERNANCE Decision 3) |
+| Terraform | `terraform/platform` (then `terraform/pipeline`); `cost_profile` and limits only in `terraform/env/dev.tfvars`. Provider `snowflakedb/snowflake`, exact version in `.terraform.lock.hcl` |
+| Terraform identities | `TERRAFORM_SVC` (apply, CI only) · `TERRAFORM_PLAN_SVC` / `TERRAFORM_PLAN_ROLE` (read-only plan). Agents use the plan identity only |
+| ACCOUNTADMIN in Terraform | only the resources listed in COST_GOVERNANCE Decision 9 (monitors, `CDC_WH`, …); enforced by `tests/unit/test_terraform_providers.py` |
 | Warehouse generation | set with `GENERATION = '1'`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` is rejected on this account |
 | Agent environment | dev only (Constitution R2) |
 
