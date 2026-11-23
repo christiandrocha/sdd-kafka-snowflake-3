@@ -10,8 +10,8 @@
 | **Date** | 2026-11-18 |
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.2 |
-| **Status** | In Progress — items 1–9 built; 10–22 pending |
+| **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.3 |
+| **Status** | In Progress — items 1–9 and 16–18 built (15: `queries.sql` draft only); 10–14, 15, 19–22 pending |
 
 ---
 
@@ -215,7 +215,7 @@ and B4 closed.
 ### Owner decisions (2026-11-18)
 
 1. `EXECUTE TASK` / `EXECUTE MANAGED TASK` granted by **`securityadmin`**: a **hypothesis to
-   validate at the Day 3 apply**. The DESIGN 1.3 text below is ready in case it has to move to
+   validate at the Day 3 apply**. The DESIGN 1.4 text below (numbered 1.3 when written) is ready in case it has to move to
    `accountadmin`.
 2. `create_readonly_role.sql` deleted too (deviation from item 8), after a grep.
 3. `verify_governance.sql` runs as **`TERRAFORM_PLAN_ROLE`**, with three grants: USAGE on
@@ -278,7 +278,9 @@ exist yet).
 | `verify_governance.sql` is assertive and read-only (DESIGN: "read-only account checks") | v2 trap: an invisible object returns zero rows, not an error | CI fails on drift |
 | Plan role read grants + budget VIEWER | Needed for item 9 as decided | Two more grant resources; one SQL grant |
 
-### DESIGN 1.3 — prepared, NOT applied (only if the Day 3 apply rejects SECURITYADMIN)
+### DESIGN 1.4 — prepared, NOT applied (only if the Day 3 apply rejects SECURITYADMIN)
+
+(Numbered 1.3 when written in run 3; renumbered after run 4 used 1.3 for the Decision 11 consequence.)
 
 Apply only if the platform apply fails on
 `snowflake_grant_privileges_to_account_role.sysadmin_execute_task` with an insufficient-privileges
@@ -287,7 +289,7 @@ error. Paste the error into the row.
 - **Decision 9, named-exception table**, new row:
   `| snowflake_grant_privileges_to_account_role.sysadmin_execute_task (EXECUTE TASK, EXECUTE MANAGED TASK on account → SYSADMIN) | SECURITYADMIN's MANAGE GRANTS was rejected for these global privileges at the Day 3 apply: "<error text>" | Day 3 apply log (run <id>) |`
 - **Revision history:**
-  `| 1.3 | <date> | Christian (with Claude) | Day 3 apply: SECURITYADMIN cannot grant EXECUTE TASK / EXECUTE MANAGED TASK; the grant joins the accountadmin named list. No scope change. |`
+  `| 1.4 | <date> | Christian (with Claude) | Day 3 apply: SECURITYADMIN cannot grant EXECUTE TASK / EXECUTE MANAGED TASK; the grant joins the accountadmin named list. No scope change. |`
 - **Code, same PR:** `provider = snowflake.accountadmin # Decision 9 named exception` on that
   resource. Add it to `ACCOUNTADMIN_ALLOWED` in `test_terraform_providers.py`. Change the
   assertion in `test_execute_task_privileges_are_granted_by_platform` to `accountadmin`.
@@ -296,7 +298,7 @@ error. Paste the error into the row.
 
 | # | Issue | Needed by | Owner |
 |---|-------|-----------|-------|
-| O16 | **Hypothesis:** SECURITYADMIN can grant `EXECUTE TASK` / `EXECUTE MANAGED TASK`. If the apply fails, use DESIGN 1.3 above | Day 3 apply | build-agent |
+| O16 | **Hypothesis:** SECURITYADMIN can grant `EXECUTE TASK` / `EXECUTE MANAGED TASK`. If the apply fails, use DESIGN 1.4 above | Day 3 apply | build-agent |
 | O17 | `resource_constraint = STANDARD_GEN_2` in profile `baseline` is assumed by symmetry with F6; confirm in the dry run (AT-002 is only formally checked in `optimized`) | Day 7 | build-agent |
 | O18 | Scripting constructs not yet run on the account: `SHOW PARAMETERS` via `EXECUTE IMMEDIATE` + `RESULT_SCAN(LAST_QUERY_ID())` inside a cursor loop; `COUNT_IF("IS_VALID")`; `SHOW RESOURCE MONITORS` `level`/`notify_at` values; `SHOW WAREHOUSES` `size` spelling | First CI run | build-agent |
 | O19 | `VIEWER` may not be enough for `GET_SPENDING_LIMIT` / `GET_REFRESH_TIER` (undocumented). If not, the budget block fails loudly. Fix with the least extra grant, never ACCOUNTADMIN | First CI run | build-agent |
@@ -315,9 +317,97 @@ error. Paste the error into the row.
 
 ---
 
+## Run 4 — 2026-11-18 — manifest items 16–18 (+ 15 draft)
+
+Branch `feat/cost-governance-items-16-18` (from `main` after #3). Requirement: **REQ-08 / AT-009**.
+It also makes AT-001 executable and runs exceptions 2 and 3.
+
+### Owner decisions (2026-11-18)
+
+1. **Item 15 stays with the owner** (DESIGN *Agent Assignment*). The agent drafted only
+   `docs/measurement/queries.sql`, marked DRAFT with `TODO(owner)` decisions.
+2. **AWS state bootstrap is a documented manual step** (runbook), not a third Terraform root. The
+   runbook gives a least-privilege OIDC policy, trust restricted to this repository and the
+   `snowflake-plan` / `snowflake-dev` environments, and **mandatory bucket versioning**.
+3. The `apply` job compares its re-plan with the PR plan and **warns without blocking**.
+4. A skipped pipeline plan is shown in the job summary.
+5. The Decision 11 consequence is recorded → **DESIGN 1.3**. The EXECUTE TASK fallback text
+   prepared in run 3 is renumbered **1.4**. PR #3's description, already merged, still calls it 1.3.
+
+### Docs read before writing
+
+- Snowflake CLI *Configure connections*: `snow sql -x` / `--temporary-connection` reads
+  `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_AUTHENTICATOR`, `SNOWFLAKE_PRIVATE_KEY_RAW`.
+  Set only one of `_RAW` and `_FILE`.
+- HashiCorp *S3 backend*: with `use_lockfile`, Get/Put/Delete are needed on `<key>.tflock`; no
+  Delete on the state; versioning recommended.
+- GitHub *Configuring OpenID Connect in AWS*: `sub` = `repo:OWNER/REPO:environment:NAME`,
+  `aud` = `sts.amazonaws.com`, `id-token: write`.
+- `snowflake-cli` versions on PyPI: pinned **3.32.1** (2026-11-02, more than two weeks old).
+
+### Files
+
+| # | File | Notes |
+|---|------|-------|
+| 16 | `.github/workflows/terraform.yml` | Four jobs, as in Decision 11:<br>• `static` (forks too, no secrets): fmt + validate.<br>• `plan`: same-repo PRs, `snowflake-plan`, `TF_VAR_plan_role`. Platform plan; Bronze check with the plan role; pipeline plan or a **skip notice in the summary**; summary + PR comment; plan summaries uploaded as an artifact.<br>• `apply`: push to `main`, `snowflake-dev`. Fetch the PR plan summaries → platform re-plan → **compare (warn only)** → apply → `-detailed-exitcode` plan (AT-001) → seed / account_monitor / budget → pipeline the same way once its state is non-empty → `verify_governance.sql` with the **read-only key**.<br>• `apply-pipeline`: `workflow_dispatch`; requires Bronze, then plan / apply / second plan / verify.<br>Settings: `defaults.run.shell: bash` (pipefail); one apply concurrency group, never cancelled; Terraform 1.11.4. |
+| 16 | `.github/scripts/plan_summary.py` | `summarize` (changed address + actions, no values) and `compare` (always exits 0) |
+| 16 | `.github/scripts/bronze_ready.py` | Parses `snow sql --format json` from `SHOW TABLES`; prints `ready` or `missing: …` |
+| 16 | `terraform/platform/grants.tf` | + `plan_tables_future`: REFERENCES on future tables, **database level** (a BRONZE schema-level grant would cancel CDC_ROLE/RO's database-level future grants there) |
+| 16 | `docs/runbooks/terraform-state-bootstrap.md` | Bucket (versioning **mandatory**, SSE-S3, public access blocked, owner-enforced, TLS-only policy). OIDC provider. Two roles, `sdd3-tfstate-plan` (state read-only) and `sdd3-tfstate-apply`, each trusting exactly one `sub` (`StringEquals`). Minimal S3 policy. GitHub environments, variables and secrets table. Verification and state recovery |
+| 17 | `.github/workflows/ci.yml` (**shared file**) | `lint` job + `pytest==8.3.3 pyyaml==6.0.2` and `pytest tests/unit -q`. The "referenced files exist" regex now matches whole paths (it matched `scripts/x.py` inside `.github/scripts/x.py` and `../../…`, which would have turned CI red) and normalises `../`. Header note on the deletion of `deploy.yml` |
+| 18 | `.github/workflows/deploy.yml` | Deleted |
+| 15 (draft) | `docs/measurement/queries.sql` | DRAFT: Q1 warehouse credits/day/window (UTC), Q2 serverless tasks, Q3 metering by service type with the cloud-services adjustment, Q4 resumes, Q5 per-cluster buckets (arithmetic checked), Q6 freshness join sketch (Decision 7), Q7 idle `TASK_HISTORY`, Q8 attribution skeleton. 11 `TODO(owner)` |
+| — | `tests/unit/test_workflows.py` | 22 checks:<br>• no destroy / auto-approve;<br>• static job without secrets;<br>• plan job: fork guard, read-only, never `snowflake-dev`;<br>• applies only in `snowflake-dev` on `main`, each followed by a `-detailed-exitcode` plan;<br>• compare steps warn and never `exit 1`;<br>• skip written to the summary;<br>• e-mail only from a secret;<br>• verify with the read-only key and `tail -n 1`;<br>• secrets only in jobs with an environment; `id-token` only with the AWS action;<br>• actions pinned (`@vN`, known publishers); tool versions pinned;<br>• `BRONZE_TABLES` equals `gate_domains`; `ci.yml` runs pytest;<br>• the `ci.yml` reference check passes here and still catches a missing helper. |
+| — | `tests/unit/test_ci_helpers.py` | 10 checks on both helpers, including their CLIs |
+
+### Bugs caught before they ran
+
+| Bug | Where | Fix |
+|-----|-------|-----|
+| `terraform console` prints "undeclared variable" warnings on **stdout**: `profile=$(…)` would have captured them | verify steps | `tail -n 1`, plus validation of the value (`baseline\|optimized`, digits) |
+| `run:` without an explicit shell is `bash -e` without pipefail: a failing `terraform plan \| tee` would pass | plan steps | `defaults.run.shell: bash` |
+| `ci.yml`'s reference check matched suffixes of `.github/scripts/*.py` | ci.yml | regex with lookbehind + `../` normalisation; tested both ways |
+| `vars.*` are printed unmasked in public logs — the budget e-mail would leak | budget step | `BUDGET_NOTIFY_EMAIL` is a **secret** (PR #2 description said "variable": superseded) |
+| My first Q5 formula assigned a cluster's first hour bucket to the previous cluster | queries.sql | Corrected and checked with a small Python simulation |
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `terraform -chdir=terraform fmt -check -recursive` | ✅ |
+| `terraform validate` (platform, pipeline) | ✅ |
+| `ruff check .` | ✅ |
+| `pytest tests/unit -q` | ✅ 130 passed |
+| `ci.yml` reference check, run locally from the YAML | ✅ exit 0; a planted missing helper → exit 1 |
+| `terraform console` profile/timeout extraction with `tail -n 1` | ✅ `optimized`, `10000` |
+| Workflow on GitHub | ⏭️ `static` and `ci.yml` run on the PR. `plan` / `apply` need the bootstrap (runbook) and the environments |
+
+### Deviations from DESIGN 1.3
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| New `.github/scripts/` (not in the ownership table) | The compare and Bronze-check logic needed tests; inline shell could not be tested | Recorded in manifest item 16 (DESIGN 1.3) |
+| New runbook `terraform-state-bootstrap.md` (not among the five of item 19) | Owner decision: manual AWS step, documented | — |
+| Edited the reference-check regex in `ci.yml` | Needed for item 16 not to break CI | Shared file, one change at a time |
+| Two AWS roles instead of one | Plan job gets no write access to the state | One more `AWS_ROLE_ARN` value (per environment) |
+
+### Open issues (new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O24 | **Bootstrap before Day 3:** AWS (runbook §1–4); GitHub environments with `snowflake-dev` → reviewer + `main` only (§5); the variables and secrets in §5. **`BUDGET_NOTIFY_EMAIL` is a secret** (replaces O12's "variable") | Day 3 | Christian |
+| O25 | A same-repo PR branch can edit `terraform.yml` and use the `snowflake-plan` key (no reviewer by design). It is read-only, but it can read metadata. Acceptable while only the owner pushes branches; revisit if collaborators join | Ongoing | Christian |
+| O26 | `gh api …/commits/<sha>/pulls` and `gh run list --commit` locate the PR plan. A direct push or a squash merge, where the head SHA differs, gives "no PR plan" as a warning, not a failure | First `main` run | build-agent |
+| O27 | `snow sql -x` against a `SHOW` statement with `--format json`: the output shape is unverified. `bronze_ready.py` accepts any nesting; an error fails the step loudly | First PR plan | build-agent |
+| O28 | `CDC_GOVERNANCE_RO` has USAGE on `CDC_WH` only, but measurement queries must not use `CDC_WH` during windows (`queries.sql` TODO) | Before Day 8 | Christian |
+| O29 | Item 15 (`PROTOCOL.md`, `ATTRIBUTION.md`, `RESULTS_TEMPLATE.md`, finished `queries.sql`) and B5 | Before Day 7 | Christian |
+
+---
+
 ## Next Step
 
-Owner reviews the PR for items 7–9. Next build: `/sdd-build COST_GOVERNANCE items 10-14` (Python:
-`gate.py`, sensor, job, tests, load generator) or `items 15-18` (measurement docs, `terraform.yml`,
-`ci.yml`, delete `deploy.yml`). Item 16 is what makes the Day 3 apply possible.
+Owner reviews the PR for items 16–18, then runs the bootstrap (`docs/runbooks/terraform-state-bootstrap.md`,
+`scripts/00_terraform_bootstrap.sql`) and the pre-apply checklist (credit price, probe P1, owner user,
+secrets) before the Day 3 apply. Next build: `/sdd-build COST_GOVERNANCE items 10-14` (Python), then
+19–22 (owner-authored docs; item 21 shared files).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
