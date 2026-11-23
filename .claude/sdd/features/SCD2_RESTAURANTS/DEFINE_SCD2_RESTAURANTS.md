@@ -11,7 +11,7 @@
 | **Feature** | SCD2_RESTAURANTS |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Approved — ready for Design |
+| **Status** | Approved — in Design (DESIGN 1.0.1, awaiting independent review) |
 | **Clarity Score** | 13/15 |
 | **Approved by** | Christian, 2026-11-17 |
 
