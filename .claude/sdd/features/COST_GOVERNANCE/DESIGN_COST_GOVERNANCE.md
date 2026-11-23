@@ -11,7 +11,7 @@
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | 1.3 — Ready for Build (owner decisions 2026-11-18 at the items 16–18 Build; 1.1–1.2 owner decisions; 1.0 signed off by independent review 2026-11-18) |
+| **Status** | 1.4 — Ready for Build (owner review of the 1.3 → 1.4 diff, 2026-11-18; 1.1–1.3 owner decisions; 1.0 signed off by independent review 2026-11-18) |
 
 ---
 
@@ -286,6 +286,8 @@ Kafka activity.
   the burst has **settled** (`quiet ≥ QUIET_CYCLES`, default 3) **or** it has been pending for ≥ *N*
   (**starvation guard** for continuous traffic). If a settled query finds no rows, one more settled
   check, then `pending` clears. A run made mid-burst (starvation guard) keeps `pending` set.
+  **An empty starvation-guard query restarts the starvation clock** (`pending_since = now`): the
+  next guard query waits another *N* (1.4).
 
 **Why `QUIET_CYCLES = 3` is enough:** "Kafka activity" is the broker receiving the message, not the
 Bronze commit. Between the two sit the connector's flush, Snowpipe Streaming's commit (seconds), the
@@ -298,6 +300,17 @@ sequences; no stranded row and a worst wait of 10 min on 2,000) **that is not in
 these results are to be reproduced by `tests/unit/test_gate.py` at Build, which becomes the evidence.
 The test file covers those cases plus the
 "empty starvation-guard query followed by an immediate retry" case (at most two consecutive queries).
+
+**Found at Build (2026-11-18, revision 1.4):** draft 0.4 / 1.0–1.3 (Pattern 4) breaks the "at most
+two consecutive queries" claim under **continuous Kafka traffic with an empty `PENDING_RUNS`**. That
+is the state when the gate tasks are suspended (budget action, 3 failures) while load continues.
+Each activity cycle resets `retries` but keeps `pending_since`, so after the first empty guard query
+`waited_enough` and `window_open` stay true and the sensor queries **every minute**: 50 queries in
+60 min with *N* = 10. `CDC_WH` never suspends, which is v2's ~24 credits/day failure mode. Fix: an
+empty query that was **not** settled (a starvation-guard query) sets `pending_since = now` and leaves
+`retries` alone. The one-more-check retry applies only to settled queries. Same scenario after the
+fix: one query per *N* (minutes 10, 20, 30, 40, 50). The simulation is kept as a regression test in
+`tests/unit/test_gate.py`.
 
 **Consequences:** profile B adds up to `QUIET_CYCLES` minutes of latency per burst, inside the
 freshness guardrail (p95 ≤ *N* + 5). A gate task that fires more than 2 × `QUIET_CYCLES` minutes after
@@ -317,7 +330,29 @@ before the burst reached Bronze — common in profile A, which runs almost every
 finding 5).
 
 **Choice:** `PENDING_RUNS` gains `consumed_run_key`, written by the sensor in the same `UPDATE` that
-marks rows consumed; the job writes the same key to `PROCESSING_LOG`. Freshness of a burst =
+marks rows consumed. `log_processing_results` (`dagster/pipeline/assets.py`, the code that writes
+`PROCESSING_LOG`) writes the same key, read from the run's `dagster/run_key` tag (1.4: the 1.0–1.3
+text said "the job", but `jobs.py` does not write `PROCESSING_LOG`). The sensor runs the `UPDATE`
+**first** and then reads the rows it marked (`WHERE consumed_run_key = :key`). The marked set is
+then exactly the set the run reports, with no window between a `SELECT` and an `UPDATE` (1.4).
+
+**A run that fails after the `UPDATE` (1.4): reprocess, never accept the loss.** A `PENDING_RUNS`
+row is a trigger, not data: every `cdc_pipeline_job` run rebuilds all models over all of Bronze,
+idempotently (Bronze `merge`), so no CDC row is lost either way. What a failed run can lose is
+the **trigger** and the **attribution**. Its rows are marked consumed by a key that never reaches
+Gold, so freshness would pin the burst to a run that produced nothing. Choice: a
+`run_failure_sensor` on `cdc_pipeline_job`, `pending_run_release_sensor` in `sensors.py`, runs
+`UPDATE … SET consumed = FALSE, consumed_run_key = NULL WHERE consumed_run_key = :failed_key`. The
+rows go back to pending; the next gate query re-triggers them and is attributed to the run that
+actually consumes them. **No automatic retry run.** A retry would fail fast in the most likely
+cause (the monitor suspended `CDC_WH`, *Error Handling*) and would add a resume outside the batching
+window, which is exactly what profile B measures. The cost: released rows wait for the next gate
+query. That is the next Kafka activity, or the starvation guard if traffic continues. Freshness
+reports the burst as delayed or as a gap, and window validity reports failed runs.
+
+Residual case, accepted and documented: if the sensor's `UPDATE` commits but the run is never
+created (the Dagster daemon dies between the two), no failure event exists. The rows keep a key
+with no run, and freshness reports a gap. The Bronze data is still processed by the next run. Freshness of a burst =
 `finished_at` of the last Gold model in the run whose `run_key` consumed the **first** `PENDING_RUNS`
 row detected after the burst's `committed_at` − `committed_at`. p95 per window.
 
@@ -527,7 +562,7 @@ measured.
 | REQ-02 | `warehouse.tf` (Decision 4), profile B | AT-002 |
 | REQ-03 | `monitors.tf` + `account_monitor.sql` + `budget.sql` (Decisions 5, 8, 9) | AT-003 |
 | REQ-04 | `terraform/pipeline/gate.tf` (Decision 5) | AT-004 |
-| REQ-05 | `gate.py` + `sensors.py` (Decision 6) | AT-005, AT-006 |
+| REQ-05 | `gate.py` + `sensors.py` (Decision 6); `assets.py` writes the run key (Decision 7) | AT-005, AT-006 |
 | REQ-06 | `tests/load/generate_load.py` | AT-007 |
 | REQ-07 | `docs/measurement/` (Measurement plan, Decisions 7, 13) | AT-008 |
 | REQ-08 | `.github/workflows/terraform.yml` (Decision 11) | AT-009 |
@@ -636,9 +671,9 @@ output, committed), and `docs/runbooks/after-trial.md` explains how to redeploy 
 | 8 | `scripts/streams_and_tasks.sql`, `scripts/snowflake_setup.sql`, `scripts/00_account_bootstrap.sql` | Delete | Replaced by 1–7 (git history keeps them) | 7 |
 | 9 | `scripts/verify_governance.sql` | Modify | Checks for AT-002/003/004 on the new names | 4, 7 |
 | 10 | `dagster/pipeline/gate.py` | Create | Pure decision function (Decision 6) | — |
-| 11 | `dagster/pipeline/sensors.py` | Modify | Use `gate.decide`; write `consumed_run_key` | 10 |
-| 12 | `dagster/pipeline/jobs.py` | Modify | Pass `run_key` to `PROCESSING_LOG`; REQ-11 selection (COULD) | 11 |
-| 13 | `tests/unit/test_gate.py` | Create | Parity, settle, window, starvation, retry, migration | 10 |
+| 11 | `dagster/pipeline/sensors.py` | Modify | Use `gate.decide`; `UPDATE` first with `consumed_run_key`, then read the marked rows; `pending_run_release_sensor` for failed runs (Decision 7) | 10 |
+| 12 | `dagster/pipeline/assets.py` (`run_key` → `PROCESSING_LOG`); `dagster/pipeline/jobs.py` (REQ-11 selection, COULD) | Modify | Write the run's `dagster/run_key` to `PROCESSING_LOG.RUN_KEY` | 11 |
+| 13 | `tests/unit/test_gate.py` | Create | Parity, settle, window, starvation, retry, continuous-traffic regression (1.4), migration | 10 |
 | 14 | `tests/load/generate_load.py`, `tests/unit/test_generate_load.py` | Create | REQ-06 / AT-007; task-state check after each cluster | — |
 | 15 | `docs/measurement/{PROTOCOL.md,queries.sql,ATTRIBUTION.md,RESULTS_TEMPLATE.md}` | Create | REQ-07 | 14 |
 | 16 | `.github/workflows/terraform.yml`, `.github/scripts/{plan_summary,bronze_ready}.py`, `docs/runbooks/terraform-state-bootstrap.md` | Create | REQ-08 (Decision 11); state bootstrap runbook (Decision 12) | 2–7 |
@@ -656,7 +691,7 @@ output, committed), and `docs/runbooks/after-trial.md` explains how to redeploy 
 | Path | Access | Notes |
 |------|--------|-------|
 | `terraform/`, `scripts/*.sql` | Owns | |
-| `dagster/pipeline/{sensors,gate,jobs}.py` | Owns | |
+| `dagster/pipeline/{sensors,gate,jobs,assets}.py` | Owns | `assets.py` added in 1.4 (item 12); no other feature or fast track touches it |
 | `tests/load/`, `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py` | Owns | |
 | `docs/measurement/`, the five runbooks above | Owns | |
 | `.github/workflows/terraform.yml`, `deploy.yml` | Owns (new / delete) | |
@@ -673,7 +708,7 @@ No intersection with SCD2_RESTAURANTS' owned paths. The two features can be buil
 | Role | Files | Why |
 |------|-------|-----|
 | Builder (Claude Code, Terraform + Snowflake context, `TERRAFORM_PLAN_SVC` only) | 1–9, 16, 18, 20 | IaC; loads F1–F10 and each resource's provider docs before writing it |
-| Builder (Cursor, Python) | 10–14, 17 | `gate.py` is the riskiest logic and benefits from tight human review |
+| Builder (Cursor, Python) | 10–14, 17 | `gate.py` is the riskiest logic and benefits from tight human review. **Deviation (owner decision 2026-11-18):** 10–13 and 17 built by Claude Code; the human review moves to the PR |
 | Author (Christian) | 15, 19, 21, 22 | Protocol, runbooks and README carry the portfolio's voice |
 | Validator (fresh session) | VALIDATION | Loads DEFINE + `docs/measurement/` only |
 
@@ -800,9 +835,12 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
         state = replace(state, last_run_at=now)
     if window == timedelta(0):
         return replace(state, pending=state.quiet < LEGACY_HOT_CYCLES)
-    if found_rows or state.retries >= 1:
+    settled = state.quiet >= QUIET_CYCLES
+    if found_rows or (settled and state.retries >= 1):
         still_arriving = state.quiet < QUIET_CYCLES   # ran on the starvation guard mid-burst
         return replace(state, pending=still_arriving, pending_since=now if still_arriving else None, retries=0)
+    if not settled:                                    # 1.4: empty starvation-guard query
+        return replace(state, pending_since=now)       # restart the clock; wait another N
     return replace(state, retries=state.retries + 1)    # one more settled check, then give up
 ```
 
@@ -839,7 +877,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | Level | What | How | AT |
 |-------|------|-----|----|
 | Static | fmt, validate, plan | CI on every PR, both roots (Decision 11) | AT-009 |
-| Unit | `gate.decide` / `after_query`: legacy parity, settle, window, starvation guard, retry, two consecutive queries, cursor migration | `pytest`, table-driven + randomized parity | AT-005, AT-006 |
+| Unit | `gate.decide` / `after_query`: legacy parity, settle, window, starvation guard, retry, two consecutive queries, continuous traffic with empty `PENDING_RUNS` (1.4 regression), worst wait ≤ *N* on 2,000 random sequences, cursor migration from v2. Sensor: `UPDATE`-then-read race | `pytest`, table-driven + randomized parity | AT-005, AT-006 |
 | Unit | Generator: same seed → identical schedule and row counts | `pytest`, no database | AT-007 |
 | Integration | Apply on dev, then `plan` shows no changes | CI apply job | AT-001 |
 | Account | `SHOW WAREHOUSES`, `SHOW RESOURCE MONITORS`, `SHOW TASKS`, budget `GET_CUSTOM_ACTIONS` | `verify_governance.sql` | AT-002, 003, 004 |
@@ -854,7 +892,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | Bronze tables missing | `pipeline` plan skipped with a notice; apply blocked | — |
 | Gate task fails 3× | Task suspends itself | `gate-task-failure.md` |
 | Budget reaches its limit | Gate tasks suspended by the custom action; not auto-resumed | `budget-alert.md` |
-| Monitor suspends `CDC_WH` | dbt runs fail fast; sensor keeps rows pending | `monitor-suspended.md` |
+| Monitor suspends `CDC_WH` | dbt runs fail fast; `pending_run_release_sensor` returns their rows to pending (Decision 7) | `monitor-suspended.md` |
 | Prometheus down | Sensor fails open (v2 behaviour) — a resume, never lost data | `connector-down.md` |
 | Stack machine sleeps | Gap in `commits.csv`; window voided and rerun | `PROTOCOL.md` |
 
@@ -923,6 +961,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 1.1 | 2026-11-18 | Christian (with Claude, Build session) | Build found that only ACCOUNTADMIN can assign a warehouse to a monitor (F14): `CDC_WH` moves to the `accountadmin` alias, recorded as a named exception limited to listed resources and never used by a PR plan (Decisions 4, 9, 11; Pattern 2). Account-level monitor stays CI SQL, `scripts/account_monitor.sql` (exception 3, owner decision; `snowflake_current_account` as future alternative — F12). F6 completed with the provider side; F11 (preview resources), F13 (no budget resource) added. Manifest items 2 and 6, Security and Risks updated. No scope change. Reviewed by the owner (diff), not by an independent session. |
 | 1.2 | 2026-11-18 | Christian (with Claude, Build session) | Items 5–6 Build, owner decisions: budget refresh `TIER_1H`; no cycle-start action; `budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role instead of ACCOUNTADMIN, so the `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list. F8 now from official docs (6.5 h default / 1 h; actual actions once a month, one retry); Decision 5/8 worst case recomputed (~1.5 credits overshoot, ~63 total). SNOWFLAKE database-role grant confirmed. New `CDC_CI_WH` for the CI SQL steps (validity rules; owner decision). Not reviewed by an independent session. |
 | 1.3 | 2026-11-18 | Christian (with Claude, Build session) | Items 16–18 Build, owner decisions: Decision 11 consequence recorded (approval before the job, so the apply re-plans and compares with the PR plan, warning only; pipeline-skip notice in the job summary; read-only key in `snowflake-dev` for `verify_governance.sql`; `BUDGET_NOTIFY_EMAIL` as a secret). AWS state bootstrap as a documented manual step with least-privilege OIDC roles and mandatory bucket versioning (Decision 12). Manifest item 16 lists its helpers and runbook. Item 15 stays with the owner; the build agent drafted `queries.sql` only. Not reviewed by an independent session. |
+| 1.4 | 2026-11-18 | Christian (with Claude, Build session) | Items 10–13 Build: Pattern 4 / Decision 6 corrected, because an empty starvation-guard query under continuous traffic made the sensor query every minute; it now restarts `pending_since` (simulation kept as a regression test). Decision 7: `assets.py` writes the run key; the sensor runs `UPDATE` first, then reads the rows it marked; a failed run's rows are released back to pending (reprocess, no automatic retry). `assets.py` owned by COST_GOVERNANCE (no other feature touches it); manifest item 12 points to it. Agent Assignment deviation: Claude Code builds 10–13. No scope change. |
 
 ---
 

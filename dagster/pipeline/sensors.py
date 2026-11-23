@@ -1,7 +1,24 @@
 """
-sensors.py — v5 (after the credit-consumption diagnosis)
+sensors.py — v6 (COST_GOVERNANCE, DESIGN 1.4)
 
-CHANGES RELATIVE TO THE PREVIOUS VERSION:
+CHANGES IN v6 (2026-11-18, REQ-05, Decisions 6 and 7):
+
+* bronze_new_data_sensor delegates the "may I touch Snowflake now?" decision to
+  gate.decide / gate.after_query. BATCH_WINDOW_MINUTES=0 (profile A) reproduces
+  the v5 behaviour below exactly (tests/unit/test_gate.py checks parity); a
+  window N > 0 (profile B) waits for the burst to settle and runs at most once
+  per N. The cursor now holds the gate state; v5 cursors migrate on first read.
+* PENDING_RUNS is consumed UPDATE-first (gate.consume_pending): the rows are
+  marked with the run's key, then exactly those rows are read. v5 read first
+  and then marked `WHERE consumed = FALSE`, which also marked rows a gate task
+  inserted in between, without reading them.
+* pending_run_release_sensor: when a cdc_pipeline_job run fails, its rows go
+  back to pending (Decision 7: reprocess, no automatic retry).
+
+The v5 notes below are kept as history; where they name
+scripts/streams_and_tasks.sql, the gate now lives in terraform/pipeline/gate.tf.
+
+CHANGES IN v5 RELATIVE TO THE PREVIOUS VERSION:
 
 1. bronze_new_data_sensor
    Before: every 60s it opened a Snowflake connection and ran up to 20
@@ -54,17 +71,20 @@ at the point in the code.
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import requests
 from dagster import (
     DefaultSensorStatus,
+    RunFailureSensorContext,
     RunRequest,
     SensorResult,
     SkipReason,
+    run_failure_sensor,
     sensor,
 )
 
+from . import gate
 from .jobs import cdc_pipeline_job, sync_metadata_job
 from .resources import SnowflakeResource
 
@@ -88,13 +108,10 @@ KAFKA_MESSAGES_METRIC = (
     f'kafka_server_brokertopicmetrics_messagesin{{topic=~"{CDC_TOPIC_PATTERN}"}}'
 )
 
-# How many cycles bronze_new_data_sensor keeps checking Snowflake after the
-# last activity seen in Kafka. It exists because the two ends are asynchronous:
-# the message arrives in Kafka on one cycle, but the native Task only writes
-# PENDING_RUNS up to a minute later. Without that margin, the last row of a
-# burst would go unconsumed until the next message -- which in a quiet period
-# may never come.
-HOT_CYCLES_AFTER_ACTIVITY = 3
+# Batching window N (Decision 6): 0 = profile A (v2 hot cycles, now
+# gate.LEGACY_HOT_CYCLES), 10 = profile B. Set in the Dagster .env and switched
+# together with cost_profile at 00:00 UTC (Decision 2).
+BATCH_WINDOW_MINUTES = int(os.getenv("BATCH_WINDOW_MINUTES", "0"))
 
 
 # ── Zero-cost gate: Prometheus before any Snowflake connection ───────────
@@ -160,7 +177,7 @@ def _kafka_had_activity(context, last_totals: dict, initialized: bool) -> tuple:
 def bronze_new_data_sensor(context, snowflake: SnowflakeResource) -> SensorResult:
     """
     Queries CONFIG.PENDING_RUNS -- populated by Snowflake's native Tasks
-    (scripts/streams_and_tasks.sql), which only run when
+    (terraform/pipeline/gate.tf), which only run when
     SYSTEM$STREAM_HAS_DATA confirms real data in a Bronze table.
 
     CORRECTION (compared against an external second opinion, 2026-08-04):
@@ -175,76 +192,101 @@ def bronze_new_data_sensor(context, snowflake: SnowflakeResource) -> SensorResul
     redundant AND dangerous. Removed -- no row of PENDING_RUNS is filtered by
     time any more.
 
-    `context.cursor` came back into use (2026-08-10), but for something else:
-    it holds the Kafka counters of the cost gate and the hot-cycle counter. It
-    does NOT filter any row of PENDING_RUNS -- when the sensor decides to
-    query, it reads every row with `consumed = FALSE`, with no time cut. The
-    watermark bug does not come back through here.
+    `context.cursor` holds the Kafka counters of the cost gate and, since v6,
+    the gate.GateState (quiet cycles, pending burst, last run). It does NOT
+    filter any row of PENDING_RUNS -- when the sensor decides to query, it
+    marks every row with `consumed = FALSE`, with no time cut, and reads back
+    the rows it marked. The watermark bug does not come back through here.
     """
-    state = json.loads(context.cursor or "{}")
-    last_totals = state.get("totals", {})
-    hot = state.get("hot", 0)
-    initialized = state.get("initialized", False)
+    now = datetime.now(UTC)
+    window = timedelta(minutes=BATCH_WINDOW_MINUTES)
+    state, last_totals = gate.from_cursor(context.cursor, now)  # migrates v5 cursors
 
     # Phase 1 -- zero cost: no Snowflake connection, no CDC_WH resume.
-    activity, current_totals = _kafka_had_activity(context, last_totals, initialized)
+    activity, current_totals = _kafka_had_activity(context, last_totals, state.initialized)
+    decision, state = gate.decide(state, now, activity, window)
 
-    if activity:
-        hot = HOT_CYCLES_AFTER_ACTIVITY
-    elif hot > 0:
-        hot -= 1
-    else:
+    if decision == "skip":
+        reason = (
+            "No Kafka activity (via Prometheus) -- Snowflake not queried."
+            if not state.pending
+            else f"Burst pending; waiting to settle or for the {BATCH_WINDOW_MINUTES}-min window."
+        )
         return SensorResult(
-            skip_reason=SkipReason(
-                "No Kafka activity (via Prometheus) -- Snowflake not queried."
-            ),
-            cursor=json.dumps({"totals": current_totals, "hot": 0, "initialized": True}),
+            skip_reason=SkipReason(reason),
+            cursor=gate.to_cursor(state, current_totals),
         )
 
-    new_cursor = json.dumps({"totals": current_totals, "hot": hot, "initialized": True})
-
-    # Phase 2 -- only now does it touch Snowflake.
+    # Phase 2 -- only now does it touch Snowflake. Rows are marked with this
+    # run's key FIRST and only the marked rows are read (gate.consume_pending);
+    # a row a gate task inserts meanwhile stays pending for the next query.
+    run_key = gate.new_run_key(now)
     with snowflake.get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT domain, detected_at
-            FROM CONFIG.PENDING_RUNS
-            WHERE consumed = FALSE
-            ORDER BY detected_at DESC
-            """
+        rows = gate.consume_pending(conn, run_key)
+
+    state = gate.after_query(state, now, bool(rows), window)
+    new_cursor = gate.to_cursor(state, current_totals)
+
+    if not rows:
+        return SensorResult(
+            skip_reason=SkipReason("CONFIG.PENDING_RUNS has no new entries."),
+            cursor=new_cursor,
         )
-        rows = cur.fetchall()
 
-        if not rows:
-            return SensorResult(
-                skip_reason=SkipReason("CONFIG.PENDING_RUNS has no new entries."),
-                cursor=new_cursor,
-            )
-
-        domains = sorted({r[0] for r in rows})
-        newest_ts = max(r[1] for r in rows)
-
-        # Marks as consumed by the row's implicit PRIMARY KEY, not by a time
-        # cut -- avoids marking as consumed a row that had not yet been read
-        # (the same class of bug as the cursor above).
-        cur.execute(
-            """
-            UPDATE CONFIG.PENDING_RUNS
-            SET consumed = TRUE
-            WHERE consumed = FALSE
-            """
-        )
-        conn.commit()
-
+    domains = sorted({r[0] for r in rows})
     return SensorResult(
         run_requests=[
             RunRequest(
-                run_key=f"bronze-{newest_ts.isoformat()}",
-                tags={"triggered_by": "native_streams_tasks", "domains": ",".join(domains)},
+                run_key=run_key,  # also PENDING_RUNS.consumed_run_key and PROCESSING_LOG.RUN_KEY
+                tags={
+                    "triggered_by": "native_streams_tasks",
+                    "domains": ",".join(domains),
+                    "batch_window_minutes": str(BATCH_WINDOW_MINUTES),
+                },
             )
         ],
         cursor=new_cursor,
+    )
+
+
+# ── Failed runs: give their PENDING_RUNS rows back (Decision 7) ──────────────
+
+@run_failure_sensor(
+    monitored_jobs=[cdc_pipeline_job],
+    minimum_interval_seconds=60,
+    default_status=DefaultSensorStatus.RUNNING,
+)
+def pending_run_release_sensor(
+    context: RunFailureSensorContext, snowflake: SnowflakeResource
+) -> None:
+    """
+    A failed cdc_pipeline_job run leaves its PENDING_RUNS rows marked consumed by
+    a key that never reaches Gold. This returns them to pending
+    (consumed = FALSE, consumed_run_key = NULL); the next gate query re-triggers
+    them and is the run freshness gets attributed to (Decision 7).
+
+    No CDC data is at stake -- every run rebuilds all models over all of Bronze --
+    only the trigger and the attribution. Deliberately NO automatic retry: the
+    likeliest failure is the resource monitor having suspended CDC_WH, where a
+    retry fails fast, and a retry outside the batching window is exactly the
+    extra resume profile B measures. The rows wait for the next gate query (next
+    Kafka activity, or the starvation guard under continuous traffic).
+
+    Residual case: if the bronze sensor's UPDATE commits but the run is never
+    created, there is no failure event; those rows keep a key without a run and
+    freshness reports a gap (Decision 7).
+    """
+    run_key = context.dagster_run.tags.get("dagster/run_key", "")
+    if not run_key.startswith(gate.RUN_KEY_PREFIX):
+        context.log.info(
+            f"Run {context.dagster_run.run_id} has no bronze run key; nothing to release."
+        )
+        return
+    with snowflake.get_connection() as conn:
+        released = gate.release_pending(conn, run_key)
+    context.log.warning(
+        f"cdc_pipeline_job run {context.dagster_run.run_id} failed: released {released} "
+        f"PENDING_RUNS row(s) of {run_key} back to pending (no automatic retry)."
     )
 
 

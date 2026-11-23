@@ -78,7 +78,7 @@ resource "snowflake_grant_privileges_to_account_role" "sysadmin_cdc_wh" {
 # HYPOTHESIS, to validate at the Day 3 apply: SECURITYADMIN's MANAGE GRANTS is
 # enough for these global privileges. The Snowflake docs do not say who can
 # grant them; their task examples use ACCOUNTADMIN. If the apply fails here,
-# move this resource to snowflake.accountadmin per the prepared DESIGN 1.4 text
+# move this resource to snowflake.accountadmin per the prepared DESIGN 1.5 text
 # (BUILD_REPORT, run 3).
 resource "snowflake_grant_privileges_to_account_role" "sysadmin_execute_task" {
   provider          = snowflake.securityadmin

@@ -96,6 +96,10 @@ def log_processing_results(
         run_results = json.load(f)
 
     invocation_id = run_results.get("metadata", {}).get("invocation_id", "unknown")
+    # COST_GOVERNANCE Decision 7 (DESIGN 1.4): the sensor's run key, also written to
+    # PENDING_RUNS.consumed_run_key, ties freshness to the run that consumed the burst.
+    # None for runs not started by bronze_new_data_sensor (manual launches).
+    run_key = context.run_tags.get("dagster/run_key")
     results       = run_results.get("results", [])
 
     rows_to_insert = []
@@ -173,7 +177,7 @@ def log_processing_results(
             rows_processed,
             started_at, finished_at, round(duration, 3),
             error_message, "sensor",
-            now,
+            now, run_key,
         ))
 
     if not rows_to_insert:
@@ -185,9 +189,9 @@ def log_processing_results(
             table_name, layer, dbt_model, dbt_invocation_id, run_id,
             status, rows_processed,
             started_at, finished_at, duration_seconds,
-            error_message, triggered_by, logged_at
+            error_message, triggered_by, logged_at, run_key
         ) VALUES (%s, %s, %s, %s, %s, %s, %s,
-                  %s, %s, %s, %s, %s, %s)
+                  %s, %s, %s, %s, %s, %s, %s)
     """
 
     with snowflake.get_connection() as conn:
