@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7, PR open for owner review), 19–22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 19–22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -736,10 +736,23 @@ The owner edits it in the PR. Every rule written here was fixed before any measu
 
 ---
 
+## Merge of #10 — 2026-11-23
+
+No code change. PR #10 (item 15 draft) merged with a merge commit, `37c84ca`, after #9
+(SCD2_RESTAURANTS DESIGN) at `0cf8f62`. The `SDD_V3_PACKAGE.md` regenerated in both PRs was
+checked against the generator after a simulated merge, and it was up to date. CI was green on the
+merge commit. No Terraform run started (no Terraform path changed). The `_index.md` row was
+updated in #11 (`9287873`).
+
+Owner edits to PROTOCOL / ATTRIBUTION (the 10% rule, the S3 timeout) remain open until window A
+starts, 2026-11-25 00:00 UTC. Any later change goes in PROTOCOL §9 with the windows it affects.
+
+---
+
 ## Next Step
 
-Builder-owned manifest items are all built and merged (1–14, 16–18). Item 15 drafted in run 7, PR
-open for the owner's review. Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
+Builder-owned manifest items are all built and merged (1–14, 16–18). Item 15 drafted in run 7 and
+merged (#10). Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
 `BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the
 owner wants it. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
 backend bootstrap, Terraform identities, repository variables/secrets (O39), then the first apply
