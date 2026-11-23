@@ -18,7 +18,7 @@ runbooks, README with *What it actually costs*.
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
 | COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15, 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
-| SCD2_RESTAURANTS | Define — approved 2026-11-17; Design overdue (planned Day 3) | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) | Christian |
+| SCD2_RESTAURANTS | Design — draft (1.0, 2026-11-23); independent review next. Build offline until Measurement B ends (DESIGN Decision 9) | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) · [DESIGN](features/SCD2_RESTAURANTS/DESIGN_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
 
@@ -45,6 +45,7 @@ runbooks, README with *What it actually costs*.
 | `dbt/models/silver/silver_restaurants*.sql` | — | **Owns** | — |
 | `dbt/models/gold/gold_revenue_by_restaurant_version.sql` | — | **Owns** | — |
 | `tests/fixtures/restaurant_changes.*`, `dbt/tests/assert_restaurants_history_*.sql` | — | **Owns** | — |
+| `tests/unit/test_restaurant_changes.py` | — | **Owns** | — |
 | `dbt/dbt_project.yml` | — (no dbt change, DESIGN Decision 3) | Shared — serialize | — |
 | `dbt/models/*/schema.yml` | — | Shared — serialize | FT-01 |
 | `.github/workflows/terraform.yml` (new), `deploy.yml` (delete) | **Owns** | — | — |
