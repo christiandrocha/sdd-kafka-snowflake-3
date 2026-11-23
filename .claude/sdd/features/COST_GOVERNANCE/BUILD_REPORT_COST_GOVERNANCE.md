@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 19, 21, 22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9, PR open); 19, 22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -806,11 +806,65 @@ conflict).
 
 ---
 
+## Run 9 — 2026-11-23 — manifest item 21 (draft) and GitHub settings
+
+Branch `feat/cost-governance-item-21`, from `main` (`cd712af`). Requirements: **REQ-07**
+(`BATCH_WINDOW_MINUTES` and the load identity for the protocol), **REQ-08** (CI gates). DESIGN 1.4,
+no revision. **Shared files touched: `.env.example`, `CLAUDE.md`.**
+
+**Agent Assignment deviation (owner decision 2026-11-23):** item 21 is owner-authored. The build agent
+drafted it because O30 and O45 are needed before the dry run. The owner edits it in the PR.
+
+### GitHub settings changed (owner decision 2026-11-23; no secret handled)
+
+| Setting | Before | After | Closes |
+|---------|--------|-------|--------|
+| Ruleset `main protection (O40)`, id 27924450, on the default branch | `main` unprotected | PR required (0 approvals: one author), required checks `lint` + `validate` (`ci.yml` job names), no deletion, no force push, **no bypass actors** (admins included) | **O40** |
+| Environment `snowflake-dev`: deployment branches | any branch | custom policy: `main` only. Reviewer `christiandrocha` re-sent in the same call and checked afterwards | O24 (the environment half) |
+| Repository variable `SNOWFLAKE_ACCOUNT` | — | `GWHUBCF-QQ53235` | O39 (part) |
+| `snowflake-plan` variable `SNOWFLAKE_USER` | — | `TERRAFORM_PLAN_SVC` | O39 (part) |
+| `snowflake-dev` variables `SNOWFLAKE_USER`, `SNOWFLAKE_PLAN_USER` | — | `TERRAFORM_SVC`, `TERRAFORM_PLAN_SVC` | O39 (part) |
+
+**Still missing for O39**, and set by the owner after the bootstrap:
+- repository variables `TF_STATE_BUCKET`, `TF_STATE_REGION` and the three `*_RSA_PUBLIC_KEY`;
+- `AWS_ROLE_ARN` in each environment;
+- every secret: the two private keys in `snowflake-dev`, one in `snowflake-plan`, and
+  `BUDGET_NOTIFY_EMAIL`.
+
+The required checks do not include `terraform.yml`'s `static` or `plan` jobs, because that
+workflow runs only on Terraform paths. A docs-only PR would wait for them forever.
+
+### Files
+
+| File | Notes |
+|------|-------|
+| `.env.example` (shared) | New *Measurement* section. `BATCH_WINDOW_MINUTES=10` (matches `optimized` on `main`), with the rule that it switches with `cost_profile` through `make batch-window` (O30). `POSTGRES_HOST`/`POSTGRES_PORT` for the generator on the host (O45). `LOAD_SNOWFLAKE_USER`, `LOAD_SNOWFLAKE_PRIVATE_KEY_PATH` (host path) and an optional passphrase. `LOAD_*` calibration variables commented out, with the PROTOCOL rule. The `postgres` container also reads `.env`, but the official image does not use `POSTGRES_HOST` or `POSTGRES_PORT` (it reads `PGPORT`) |
+| `CLAUDE.md` (shared) | Two rows in *Environments and names*: the profile switch (both halves, the `make` targets) and the GitHub protection. New section *Measurement windows*: no `CDC_WH`, no stack-reaching merges other than the switch PR, no SCD2 account or Postgres work while a window is open |
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `sh -c 'set -a; . ./.env.example'` (how `make load` reads `.env`) | ✅ values parse (O44 check on the template) |
+| `ruff check .` · `pytest tests/unit -q` | ✅ · ✅ 211 passed (no code changed) |
+| `gh api` read-back of the ruleset, environment policy and variables | ✅ as in the table above |
+
+### Open issues (closed / new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O30 | ~~`BATCH_WINDOW_MINUTES` not in `.env.example`~~ — **closed** (draft) | — | — |
+| O40 | ~~`main` not protected~~ — **closed** | — | — |
+| O45 | ~~`POSTGRES_HOST`/`POSTGRES_PORT` not in `.env.example`~~ — **closed** (draft) | — | — |
+| O46 | With the ruleset, **every** change to `main` goes through a PR with green `lint` + `validate`, the switch PRs at 00:00 UTC included. CI takes ~35 s; open the switch PR as ready a few minutes early, so the checks are green at 00:00 | S2, S3 | Christian |
+
+---
+
 ## Next Step
 
 Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 merged in #14, `3ea3c29`, CI green; `test_makefile.py` added to the `_index` ownership map). Item 15 drafted in
-run 7 and merged (#10). Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
-`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
-backend bootstrap, Terraform identities, repository variables/secrets (O39), then the first apply
+run 7 and merged (#10); item 21 drafted in run 9 (PR open). Remaining: 19 (runbooks), 22 (README,
+Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
+backend bootstrap, Terraform identities, the rest of the repository variables and every secret (O39), then the first apply
 through CI with approval (O43).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.

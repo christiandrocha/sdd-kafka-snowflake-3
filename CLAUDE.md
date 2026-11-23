@@ -50,6 +50,21 @@ regenerate it with `python tools/build_sdd_package.py`.
 | ACCOUNTADMIN in Terraform | only the resources listed in COST_GOVERNANCE Decision 9 (monitors, `CDC_WH`, …); enforced by `tests/unit/test_terraform_providers.py` |
 | Warehouse generation | set with `GENERATION = '1'`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` is rejected on this account |
 | Agent environment | dev only (Constitution R2) |
+| Cost profile switch | `cost_profile` in `dev.tfvars` **and** `BATCH_WINDOW_MINUTES` in `.env` (0 = `baseline`, 10 = `optimized`) change together (COST_GOVERNANCE Decision 2): `make profile-a`/`profile-b` prepare a draft PR, `make batch-window` changes Dagster |
+| GitHub | `main` protected by a ruleset (PR + `lint`/`validate` required, no bypass). Environment `snowflake-dev` (apply): required reviewer, `main` only. `snowflake-plan` (PR plans): no reviewer |
+
+## Measurement windows (COST_GOVERNANCE)
+
+Source of truth: `docs/measurement/PROTOCOL.md`. Windows in UTC: dry run 2026-11-24 12:00–18:00 ·
+A 2026-11-25 00:00 → 11-27 00:00 · B → 11-29 00:00 · idle → 11-29 06:00. While a window is open,
+agents do not:
+
+- run anything on `CDC_WH` (that includes the measurement queries);
+- merge, or prepare for merge, anything that reaches the stack other than the scheduled switch PR
+  (Terraform, `.env`, `tests/load/`, `dagster/`);
+- touch the Snowflake account or Postgres for SCD2_RESTAURANTS (its DESIGN Decision 9).
+
+Any of these voids the window (PROTOCOL §5). A rerun moves the dates; PROTOCOL §9 records it.
 
 ## Forbidden for agents
 
