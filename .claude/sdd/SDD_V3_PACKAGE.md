@@ -311,7 +311,7 @@ Azure variant · project templating (copier/cookiecutter) · `engagement/` kit f
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Approved (1.4) — in Build (DESIGN 1.1) |
+| **Status** | Approved (1.4) — in Build (DESIGN 1.4) |
 | **Clarity Score** | 13/15 |
 | **Approved by** | Christian, 2026-11-17 |
 
