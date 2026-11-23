@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8, PR open); 19, 21, 22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 19, 21, 22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -808,7 +808,7 @@ conflict).
 
 ## Next Step
 
-Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 in a PR). Item 15 drafted in
+Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 merged in #14, `3ea3c29`, CI green; `test_makefile.py` added to the `_index` ownership map). Item 15 drafted in
 run 7 and merged (#10). Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
 `BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
 backend bootstrap, Terraform identities, repository variables/secrets (O39), then the first apply
