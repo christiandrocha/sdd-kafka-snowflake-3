@@ -1556,7 +1556,7 @@ SHOW WAREHOUSES LIKE 'PROBE_WH_P1%';
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](#part-6--design-cost_governance) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 (`queries.sql` draft only), 19–22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7, PR open for owner review), 19–22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -2188,14 +2188,107 @@ No code change. Stacked PRs merged in order with merge commits (O34): #4 `178f0d
 
 ---
 
+#### Run 7 — 2026-11-23 — manifest item 15 (draft for the owner)
+
+Branch `feat/cost-governance-item-15`, from `main` (`58c27ae`). Requirement: **REQ-07 / AT-008**
+(REQ-06 for the load section). Closes Build checklist **B5**. DESIGN 1.4, no revision in this run.
+
+**Agent Assignment deviation (owner decision 2026-11-23):** item 15 is owner-authored. The build
+agent wrote the full draft so that the protocol exists **before** the dry run (2026-11-24 12:00 UTC).
+The owner edits it in the PR. Every rule written here was fixed before any measurement ran.
+
+##### Owner decisions (2026-11-23, defaults accepted as proposed)
+
+1. Queries run on **`CDC_WH`, only outside the windows** (dry-run evening; ≥ 2026-11-29 10:00 UTC).
+   No Terraform change. This closes O28.
+2. **Q5, per cluster:** the 2 h bucket `[hh:00, hh+2:00)` with even `hh` is exact. Q5b checks that
+   no cluster's activity crosses the bucket end.
+3. **Q6, freshness input:** `commits.csv` is pasted in as a `VALUES` CTE, built with an `awk` line.
+   No stage, table or script is created (`CDC_GOVERNANCE_RO` cannot create objects anyway).
+4. **Gen2 rate (B3):** measured as `rate_A` = window A credits ÷ billed hours, with the
+   consumption table's 1.35 reported as a reference only.
+5. **Reruns (B5):** each void window may be rerun once, at the next 00:00 UTC. The last start is
+   2026-11-29 00:00 UTC; the idle window and the reading then move. A quota raise goes through a
+   `dev.tfvars` PR. A rerun extends the SCD2 embargo.
+
+##### Docs read before writing (Snowflake docs, 2026-11-23)
+
+| Fact | Source | Used in |
+|------|--------|---------|
+| `RESUME_WAREHOUSE` / `SUSPEND_WAREHOUSE` exist, with event state `STARTED`; `TIMESTAMP` is `TIMESTAMP_LTZ` | `WAREHOUSE_EVENTS_HISTORY` | Q4 (exact `event_name` replaces the `ILIKE`), Q4b |
+| Warehouses bill per second, with a 60 s minimum each time they resume | *Understanding compute cost* | Q4b `GREATEST(60, …)` |
+| `TIMEZONE` defaults to `America/Los_Angeles` (account » user » session); `CURRENT_TIMESTAMP()` returns the session time zone; an offset in a string cast to `TIMESTAMP_NTZ` is not applied | *Parameters*; `CURRENT_TIMESTAMP`; *Date & time data types* | Q6 `$detected_at_tz`, Q0 |
+| `METERING_DAILY_HISTORY` and `WAREHOUSE_EVENTS_HISTORY`: up to 3 h of latency; `SERVERLESS_TASK`, `SNOWPIPE_STREAMING` and `WAREHOUSE_METERING` are documented service types | view pages | PROTOCOL §6, Q3 |
+| No Gen2 credit table on the compute-cost page; it points to the external consumption PDF | *Understanding compute cost* | B3 default: rate measured from A |
+
+##### Files
+
+| File | Notes |
+|------|-------|
+| `docs/measurement/PROTOCOL.md` (new) | §1 metrics and hypotheses. §2 windows (UTC and Vitória). §3 the generator commands per window. §4 switches S0–S3, with steps and the `switch.log` format. §5 validity rules and the **rerun policy (B5)**. §6 how results are read (role, warehouse, `awk`, output file names). §7 the **dry-run checklist D1–D12**. §8 what is committed. §9 change log |
+| `docs/measurement/ATTRIBUTION.md` (new) | Decision 13 in prose. The `rate_B ≈ 1.0` self-check before any share is computed. Formulas for the Gen1, gate-task and batching shares. The known bias, with a reporting rule fixed in advance. Negative shares are reported as is |
+| `docs/measurement/RESULTS_TEMPLATE.md` (new) | Windows as run, the predictions copied verbatim from the DESIGN, H1/H2/freshness/idle, per day, per cluster, freshness, attribution, items reported apart, caveats |
+| `docs/measurement/queries.sql` | All 9 `TODO(owner)` resolved. New: Q0 (time-zone checks), Q4b (billed seconds from resume/suspend pairs), Q5b (bucket-crossing check), Q8a (measured rates with the self-check), Q8b (task-only intervals), Q8c (share arithmetic). Q6 rewritten (below). 4 `TODO(dry run)` remain, all listed in PROTOCOL §7 |
+
+##### Bugs caught in the 2026-11-18 draft before they ran
+
+| Draft | Problem | Fix |
+|-------|---------|-----|
+| Q6 joined `detected_at >= committed_at_utc` directly | `DETECTED_AT` is `CURRENT_TIMESTAMP()` in the gate task's session time zone, stored as NTZ (`procedures.tf`). With the default `America/Los_Angeles`, every detection would look ~8 h **earlier** than the commit, and freshness would pick a burst ~8 h later or report gaps | `CONVERT_TIMEZONE($detected_at_tz, 'UTC', detected_at)`; Q0.1/Q0.2 confirm the time zone in the dry run (D1) |
+| Q6 filtered `consumed_run_key IS NOT NULL` before taking the first detection | This silently skipped to a later row, which is not Decision 7's "first row detected after the commit". A never-consumed first row would have hidden a gap | Take the first detection, whatever its key; a NULL key counts as a gap |
+| Q6 counted every Gold row | A failed Gold model still has a `FINISHED_AT` | `status = 'success'` |
+| Q6 had no upper bound | Decision 7: no consuming run within 2 h means a gap | Join bounded at 120 min; gaps counted separately from the percentiles |
+| Q6 ran as `CDC_GOVERNANCE_RO` | That role has no `SELECT` on `CDC_POC.CONFIG` (`grants.tf`) | Q6 and Q0.2 run as `CDC_ROLE_RO` |
+| Header: `USE WAREHOUSE COMPUTE_WH` | `CDC_GOVERNANCE_RO` has `USAGE` on `CDC_WH` only | `CDC_WH`, only outside the windows (owner decision 1) |
+| Q4 used `event_name ILIKE '%RESUME%'` | This would also match `RESUME_CLUSTER` and double-count a resume | `event_name = 'RESUME_WAREHOUSE'` |
+
+##### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `ruff check .` | ✅ |
+| `pytest tests/unit -q` | ✅ 185 passed (no code changed) |
+| Parse every statement of `queries.sql` with `sqlglot` (Snowflake dialect; `USE`/`SET`/`SHOW` skipped; scratch venv, not a repo dependency) | ✅ 12 / 12 parse. Syntax only |
+| `awk` line from PROTOCOL §6 on a sample `commits.csv` | ✅ produces valid `VALUES` rows |
+| Against the account | ⏭️ Not run (R1; no apply yet). Every query first runs in the dry run |
+
+##### Deviations from DESIGN 1.4
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| Item 15 drafted by the build agent (Agent Assignment: author Christian) | Owner decision, so the protocol exists before the dry run | Owner edits in the PR |
+| ATTRIBUTION reports one "orchestration" share when task-only billed time is < **10%** of A's (DESIGN: "if the bias is large") | A threshold fixed before measuring cannot be chosen after seeing the numbers | Owner may change the 10% in the PR, but not after A starts |
+| `rate_B ≈ 1.0 ± 5%` self-check added before any share is computed | Billed seconds are derived from events; Gen1 at 1 credit/h is a known reference that validates the derivation | If it fails, shares wait for a Q4b fix |
+| Switch S3 carries `gate_task_timeout_ms` | Only profile B applies the timeout (Decision 5), so changing it during A has no effect, and a separate apply would be one more stack change | — |
+
+##### Open issues (new / closed)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O28 | ~~Queries on `CDC_WH` during windows~~ — **closed** by owner decision 1 | — | — |
+| O29 | ~~Item 15 and B5~~ — **closed as a draft**. Owner review of PROTOCOL / ATTRIBUTION in the PR | Before the dry run | Christian |
+| O41 | **`PENDING_RUNS.DETECTED_AT` time zone** (D1). The query handles either answer. A cleaner fix would set `TIMEZONE = 'UTC'` on the gate tasks (task session parameter, `terraform/pipeline/gate.tf`), but that is a DESIGN change and is **not** made here. If the owner wants it, it goes into DESIGN 1.5 first, then into the S0 PR, so that A and B share it | Dry run | Christian |
+| O42 | Q8b classifies task queries by `QUERY_HISTORY.user_name = $task_user` (expected `SYSTEM`, unverified, D4). If the dry run shows something else, change the `SET` | Dry run | Christian |
+| O43 | Prerequisite for S0 (before 2026-11-24 12:00 UTC): the first apply (O1, O24, O39, O40), Bronze tables, then the pipeline apply. Without it there is no dry run, and the §5 rerun policy starts to apply to A | 2026-11-24 12:00 UTC | Christian |
+
+##### Build checklist status after run 7
+
+| # | Status |
+|---|--------|
+| B3 | **Method closed** (rate measured from A, 1.35 as reference). Value after window A |
+| B5 | **Closed (draft):** `PROTOCOL.md` §5 states which window may be rerun, how the quota is raised by PR, and the last rerun date. `budget.sql` idempotence was closed in run 2 |
+| B1, B2 | Unchanged |
+
+---
+
 #### Next Step
 
-Builder-owned manifest items are all built and merged (1–14, 16–18). Remaining: 15 (PROTOCOL,
-ATTRIBUTION, RESULTS_TEMPLATE, finish `queries.sql`), 19 (runbooks), 21 (`CLAUDE.md`, `.env.example`
-incl. `BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the
-owner wants it. **Slipped from Day 3, now needed before the Day 7 dry run (2026-11-24):** credit price
-(O1), state backend bootstrap, Terraform identities, repository variables/secrets (O39), then the
-first apply through CI with approval.
+Builder-owned manifest items are all built and merged (1–14, 16–18). Item 15 drafted in run 7, PR
+open for the owner's review. Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
+`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the
+owner wants it. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
+backend bootstrap, Terraform identities, repository variables/secrets (O39), then the first apply
+through CI with approval (O43).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
 
 ---
