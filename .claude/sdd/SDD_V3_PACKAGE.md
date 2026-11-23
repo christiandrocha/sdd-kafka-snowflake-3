@@ -535,7 +535,7 @@ its method. The README states the number we got, not the number we hoped for.
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
-| **Status** | 1.4 — Ready for Build (owner review of the 1.3 → 1.4 diff, 2026-11-18; 1.1–1.3 owner decisions; 1.0 signed off by independent review 2026-11-18) |
+| **Status** | 1.4 — In Build (ready for Build since the owner review of the 1.3 → 1.4 diff, 2026-11-18; 1.1–1.3 owner decisions; 1.0 signed off by independent review 2026-11-18) |
 
 ---
 
@@ -2323,7 +2323,7 @@ When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh ch
 | **Feature** | SCD2_RESTAURANTS |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Approved — ready for Design |
+| **Status** | Approved — in Design (DESIGN 1.0.1, awaiting independent review) |
 | **Clarity Score** | 13/15 |
 | **Approved by** | Christian, 2026-11-17 |
 
