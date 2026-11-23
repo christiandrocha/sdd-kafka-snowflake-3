@@ -213,7 +213,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 19, 21, 22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
 | SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](#part-8--define-scd2_restaurants) · [DESIGN](#part-9--design-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
@@ -233,7 +233,7 @@ runbooks, README with *What it actually costs*.
 | `terraform/` | **Owns** | — | FT-03 reads |
 | `scripts/streams_and_tasks.sql`, `scripts/*.sql` | **Owns** | — | — |
 | `dagster/pipeline/sensors.py`, `jobs.py`, `gate.py`, `assets.py` | **Owns** | — | — |
-| `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py` | **Owns** | — | — |
+| `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py`, `tests/unit/test_makefile.py` | **Owns** | — | — |
 | `terraform/env/dev.tfvars` | **Owns** | — | — |
 | `tests/load/`, `docs/measurement/` | **Owns** | Reads | — |
 | `docs/runbooks/` (connector-down, monitor-suspended, budget-alert, gate-task-failure, after-trial) | **Owns** | — | FT-01 adds `schema-evolution.md` |
@@ -1558,7 +1558,7 @@ SHOW WAREHOUSES LIKE 'PROBE_WH_P1%';
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](#part-6--design-cost_governance) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8, PR open); 19, 21, 22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 19, 21, 22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -2355,7 +2355,7 @@ conflict).
 
 #### Next Step
 
-Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 in a PR). Item 15 drafted in
+Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 merged in #14, `3ea3c29`, CI green; `test_makefile.py` added to the `_index` ownership map). Item 15 drafted in
 run 7 and merged (#10). Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
 `BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
 backend bootstrap, Terraform identities, repository variables/secrets (O39), then the first apply

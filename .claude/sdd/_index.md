@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 19, 21, 22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) · [DESIGN](features/SCD2_RESTAURANTS/DESIGN_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -37,7 +37,7 @@ runbooks, README with *What it actually costs*.
 | `terraform/` | **Owns** | — | FT-03 reads |
 | `scripts/streams_and_tasks.sql`, `scripts/*.sql` | **Owns** | — | — |
 | `dagster/pipeline/sensors.py`, `jobs.py`, `gate.py`, `assets.py` | **Owns** | — | — |
-| `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py` | **Owns** | — | — |
+| `tests/unit/test_gate.py`, `tests/unit/test_generate_load.py`, `tests/unit/test_makefile.py` | **Owns** | — | — |
 | `terraform/env/dev.tfvars` | **Owns** | — | — |
 | `tests/load/`, `docs/measurement/` | **Owns** | Reads | — |
 | `docs/runbooks/` (connector-down, monitor-suspended, budget-alert, gate-task-failure, after-trial) | **Owns** | — | FT-01 adds `schema-evolution.md` |
