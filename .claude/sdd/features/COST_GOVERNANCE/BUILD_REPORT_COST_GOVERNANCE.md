@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 19–22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8, PR open); 19, 21, 22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -749,12 +749,68 @@ starts, 2026-11-25 00:00 UTC. Any later change goes in PROTOCOL §9 with the win
 
 ---
 
+## Run 8 — 2026-11-23 — manifest item 20 (`Makefile`, shared file)
+
+Branch `feat/cost-governance-item-20`, from `main` (`731cf2b`). Requirements: **REQ-07** (switches
+and load of the protocol), REQ-06 (generator) and REQ-08 (deploy). DESIGN 1.4, no revision. **Shared
+file touched: `Makefile`** (FT-02 will add `make demo` later; it is still Todo, so there is no
+conflict).
+
+### Targets
+
+| Target | Behaviour |
+|--------|-----------|
+| `load WINDOW=A\|B\|dry-run` | Runs `generate_load.py` with the exact `--start/--end/--out` of PROTOCOL §3. `.env` is sourced into the process only, and nothing is printed. Exit code 0/1/3 is passed through. An unknown `WINDOW` is a make `$(error)`, so it also fails under `make -n` |
+| `load-plan WINDOW=…` | The same with `--plan-only`; touches no database |
+| `dry-run` | `load WINDOW=dry-run`. v2's `dry-run` (`load_to_postgres.py --dry-run`) is renamed **`produce-dry-run`**; nothing in the repo called the old name |
+| `batch-window N= SWITCH=` | Rewrites or appends only `BATCH_WINDOW_MINUTES` in `.env`, recreates `dagster` and `dagster-daemon` (`env_file` is read at creation) and appends a line to `runs/switch.log` (PROTOCOL §4 step 2). `N` must be a whole number |
+| `profile-a` / `profile-b` `[SWITCH= AT= TIMEOUT_MS=]` | In a **temporary worktree** from `origin/main`, so the user's checkout is untouched. Sets `cost_profile`, and with `TIMEOUT_MS` also `gate_task_timeout_ms` (S3). Shows the diff, commits citing REQ-07, pushes, and opens a **draft** PR whose title carries the switch and time. Then it removes the worktree and the local branch. Refuses when there is nothing to change. Never applies or merges |
+| `deploy-platform` | Refuses on `main`. Runs `terraform fmt -check` and `validate` (both roots) when `terraform` is installed; otherwise prints that the CI `static` job runs them. Then `pytest tests/unit`, push, `gh pr create --fill` |
+| `deploy-pipeline` | `gh workflow run terraform.yml --ref main -f target=pipeline`. The run waits for the `snowflake-dev` approval like any apply |
+
+### Files
+
+| File | Notes |
+|------|-------|
+| `Makefile` (shared) | Targets above; `.PHONY` updated |
+| `tests/unit/test_makefile.py` (new) | 26 tests, all via `make -n` or by reading the file. The PROTOCOL §3 table and the Makefile windows must match. Unknown `WINDOW` fails. No `terraform apply`, `destroy`, `gh pr merge` or `--auto` anywhere in the Makefile (R1). The profile targets prepare a draft PR from `origin/main` and cite REQ-07. The timeout branch is inert without `TIMEOUT_MS`. `batch-window` touches one key. `deploy-pipeline` matches the workflow's `target` input |
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `ruff check .` | ✅ |
+| `pytest tests/unit -q` | ✅ 211 passed (26 new) |
+| `bash -n scripts/*.sh` | ✅ (`make ci-local`'s `yamllint` half needs `yamllint`, which is not installed on this machine — pre-existing; CI `lint` runs it) |
+| `make -n` on every new target | ✅ expansions as expected |
+| **End to end** in a throwaway clone (local bare `origin`, fake `gh` and `docker` on `PATH`; nothing left the machine) | ✅ `profile-a SWITCH=S2 AT=…`: branch on origin only, `dev.tfvars` diff, commit `chore(profile): cost_profile = baseline (REQ-07)`, draft `gh pr create` with the right title, no worktree or local branch left. `profile-b` on an already-optimized `main`: exit 1, nothing left. `profile-b TIMEOUT_MS=12000`: line appended with a comment. `TIMEOUT_MS=12s` and `N=ten` rejected. `batch-window` on an `.env` without a trailing newline: key appended on its own line, then rewritten in place; `switch.log` gets its header and lines |
+| Mutation checks | A wrong window date in the Makefile fails 2 tests. Adding `gh pr merge` fails 1 test. The Makefile was restored and checked identical to a backup with `diff` |
+
+### Deviations from DESIGN 1.4
+
+| Deviation | Reason | Impact |
+|-----------|--------|--------|
+| `deploy-pipeline` **dispatches** the `terraform.yml` workflow instead of "only opening/merging PRs" (Decision 1, *Consequences*) | Decision 11.4 defines the first pipeline apply as a `workflow_dispatch`; the DESIGN is inconsistent between the two. Owner decision 2026-11-23: follow Decision 11 and record it here, no DESIGN revision | None: the run still waits for the `snowflake-dev` reviewer; nothing is applied by `make` |
+| `deploy-platform` opens the PR of the current branch after local checks (the DESIGN does not define its steps) | The platform apply is a push to `main` (Decision 11.3), so "deploying" means opening the PR | — |
+| New targets `load-plan` and `batch-window`, beyond `deploy-*`, `profile-*`, `load` and `dry-run` | `batch-window` is the Dagster half of the switch (Decision 2; PROTOCOL §4 step 2), which has to happen in the same minute; `load-plan` is the safe first step of PROTOCOL §3 | — |
+| Profile PRs open as **drafts** | Prepared in advance; a draft cannot be merged by accident before the switch time | At the switch: `gh pr ready <n>`, then merge |
+| `tests/unit/test_makefile.py` is not in the `_index` ownership map | New file, only this feature uses it | Add it to the map with the next `_index` change |
+| `gate_task_timeout_ms` written into the shared `dev.tfvars` | Already the documented place (variable description, Decision 5) | The `platform` root warns "undeclared variable" (known, O22) |
+
+### Open issues (new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O44 | `load` sources `.env` with `sh` (`set -a; . ./.env`). Docker's `env_file` format allows values that `sh` reads differently, such as unquoted spaces or `$`. If a value breaks, quote it in `.env`. No value is printed either way | First `make load` | Christian |
+| O45 | `POSTGRES_HOST` and `POSTGRES_PORT` are not in `.env.example`. The generator defaults to `localhost:5432`, which is right when it runs on the stack host. On a separate VM, set them (item 21) | Before Day 7, if a VM is used | Christian |
+
+---
+
 ## Next Step
 
-Builder-owned manifest items are all built and merged (1–14, 16–18). Item 15 drafted in run 7 and
-merged (#10). Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
-`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the
-owner wants it. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
+Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 in a PR). Item 15 drafted in
+run 7 and merged (#10). Remaining: 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
+`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
 backend bootstrap, Terraform identities, repository variables/secrets (O39), then the first apply
 through CI with approval (O43).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
