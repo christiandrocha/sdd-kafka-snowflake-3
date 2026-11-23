@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built (15: `queries.sql` draft only); 15, 19–22 pending (owner-authored / shared) |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 (`queries.sql` draft only), 19–22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -621,10 +621,34 @@ What `test_generate_load.py` covers:
 
 ---
 
+## Merge of #4 → #5 → #6 — 2026-11-23
+
+No code change. Stacked PRs merged in order with merge commits (O34): #4 `178f0d2`, #5 `788902e`,
+#6 `251bf62`. After each merge the next PR was retargeted to `main`. CI green on each merge commit.
+
+| Finding | Action |
+|---------|--------|
+| Environment `snowflake-dev` (used by `apply (main)`) **did not exist**. GitHub would have created it on first use **without** a required reviewer, so a merge to `main` would have run an unapproved apply | Merge held; owner created `snowflake-dev` with required reviewer `christiandrocha`; checked by API before merging |
+| `plan (read-only)` failed on #4 and #5: `Input required and not supplied: aws-region` (repository variables/secrets not set) | Recorded as O39 |
+| Terraform `apply (main)` runs on `178f0d2` (waiting for approval) and `788902e` (queued) | Cancelled with `gh run cancel` by owner decision; nothing applied. The #6 merge did not start a Terraform run (no Terraform path changed) |
+| `main` has no branch protection | Recorded as O40 |
+
+### Open issues (new / closed)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O34 | ~~Merge order #4 → #5 → #6~~ — **closed** 2026-11-23 | — | — |
+| O39 | Repository variables and secrets for `terraform.yml` not set (`TF_STATE_REGION` first; state bucket, Terraform identities' keys). Every plan fails until they exist | Before the first apply | Christian |
+| O40 | `main` is not protected: nothing requires green CI or a PR before a push, which is what triggers `apply (main)`. The `snowflake-dev` reviewer is the only gate | Before the first apply | Christian |
+
+---
+
 ## Next Step
 
-Builder-owned manifest items are all built (1–14, 16–18). Remaining: 15 (PROTOCOL, ATTRIBUTION,
-RESULTS_TEMPLATE, finish `queries.sql`), 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
-`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the owner
-wants it. Merge order #4 → #5 → #6 (O34). Day 3: bootstrap and first apply.
+Builder-owned manifest items are all built and merged (1–14, 16–18). Remaining: 15 (PROTOCOL,
+ATTRIBUTION, RESULTS_TEMPLATE, finish `queries.sql`), 19 (runbooks), 21 (`CLAUDE.md`, `.env.example`
+incl. `BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the
+owner wants it. **Slipped from Day 3, now needed before the Day 7 dry run (2026-11-24):** credit price
+(O1), state backend bootstrap, Terraform identities, repository variables/secrets (O39), then the
+first apply through CI with approval.
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.

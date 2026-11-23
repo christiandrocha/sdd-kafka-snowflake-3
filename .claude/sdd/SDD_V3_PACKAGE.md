@@ -212,8 +212,8 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–9 merged (#1–#3); 16–18 (#4), 10–13 (#5) and 14 (stacked) in review; 15, 19–22 with the owner; DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
-| SCD2_RESTAURANTS | Define — approved 2026-11-17; Design on Day 3 | [DEFINE](#part-8--define-scd2_restaurants) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15, 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
+| SCD2_RESTAURANTS | Define — approved 2026-11-17; Design overdue (planned Day 3) | [DEFINE](#part-8--define-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
 
@@ -277,7 +277,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
 | 2 | ~~Credit budget for the A/B measurement~~ — resolved: 25 credits on the `CDC_WH` monitor (owner decision) | Resolved | — |
 | 6 | ~~Trial end date and balance~~ — resolved: 2026-12-17, USD 400 | Resolved | — |
-| 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (Day 3) | Lower the limits if 60 credits > 50% of the balance |
+| 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (planned Day 3, slipped; now needed before the Day 7 dry run) | Lower the limits if 60 credits > 50% of the balance |
 | 3 | ~~Repository name~~ — resolved: repository `sdd-kafka-snowflake-3` created 2026-11-17 | Resolved | — |
 | 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | ~~Terraform state backend~~ — resolved: S3 with native lockfile, no DynamoDB (DESIGN Decision 12) | Resolved | — |
@@ -1556,7 +1556,7 @@ SHOW WAREHOUSES LIKE 'PROBE_WH_P1%';
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](#part-6--design-cost_governance) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built (15: `queries.sql` draft only); 15, 19–22 pending (owner-authored / shared) |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 (`queries.sql` draft only), 19–22 pending (owner-authored / shared); no apply yet |
 
 ---
 
@@ -2166,12 +2166,36 @@ What `test_generate_load.py` covers:
 
 ---
 
+#### Merge of #4 → #5 → #6 — 2026-11-23
+
+No code change. Stacked PRs merged in order with merge commits (O34): #4 `178f0d2`, #5 `788902e`,
+#6 `251bf62`. After each merge the next PR was retargeted to `main`. CI green on each merge commit.
+
+| Finding | Action |
+|---------|--------|
+| Environment `snowflake-dev` (used by `apply (main)`) **did not exist**. GitHub would have created it on first use **without** a required reviewer, so a merge to `main` would have run an unapproved apply | Merge held; owner created `snowflake-dev` with required reviewer `christiandrocha`; checked by API before merging |
+| `plan (read-only)` failed on #4 and #5: `Input required and not supplied: aws-region` (repository variables/secrets not set) | Recorded as O39 |
+| Terraform `apply (main)` runs on `178f0d2` (waiting for approval) and `788902e` (queued) | Cancelled with `gh run cancel` by owner decision; nothing applied. The #6 merge did not start a Terraform run (no Terraform path changed) |
+| `main` has no branch protection | Recorded as O40 |
+
+##### Open issues (new / closed)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O34 | ~~Merge order #4 → #5 → #6~~ — **closed** 2026-11-23 | — | — |
+| O39 | Repository variables and secrets for `terraform.yml` not set (`TF_STATE_REGION` first; state bucket, Terraform identities' keys). Every plan fails until they exist | Before the first apply | Christian |
+| O40 | `main` is not protected: nothing requires green CI or a PR before a push, which is what triggers `apply (main)`. The `snowflake-dev` reviewer is the only gate | Before the first apply | Christian |
+
+---
+
 #### Next Step
 
-Builder-owned manifest items are all built (1–14, 16–18). Remaining: 15 (PROTOCOL, ATTRIBUTION,
-RESULTS_TEMPLATE, finish `queries.sql`), 19 (runbooks), 21 (`CLAUDE.md`, `.env.example` incl.
-`BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the owner
-wants it. Merge order #4 → #5 → #6 (O34). Day 3: bootstrap and first apply.
+Builder-owned manifest items are all built and merged (1–14, 16–18). Remaining: 15 (PROTOCOL,
+ATTRIBUTION, RESULTS_TEMPLATE, finish `queries.sql`), 19 (runbooks), 21 (`CLAUDE.md`, `.env.example`
+incl. `BATCH_WINDOW_MINUTES`), 22 (README, Day 14) — owner-authored; 20 (`Makefile`, shared) when the
+owner wants it. **Slipped from Day 3, now needed before the Day 7 dry run (2026-11-24):** credit price
+(O1), state backend bootstrap, Terraform identities, repository variables/secrets (O39), then the
+first apply through CI with approval.
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.
 
 ---
