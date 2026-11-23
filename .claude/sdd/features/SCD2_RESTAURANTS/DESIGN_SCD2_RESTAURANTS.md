@@ -11,7 +11,7 @@
 | **Date** | 2026-11-23 |
 | **Author** | design-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_SCD2_RESTAURANTS.md](./DEFINE_SCD2_RESTAURANTS.md) — v1.1, Approved |
-| **Status** | 1.0 — Draft, awaiting independent review |
+| **Status** | 1.0.1 — Draft, awaiting independent review (Decisions 8–9 owner-approved) |
 
 ---
 
@@ -347,7 +347,7 @@ comes from `decimal.handling.mode = double`).
 
 | Attribute | Value |
 |-----------|-------|
-| **Status** | Proposed — owner review requested |
+| **Status** | Accepted — owner (Christian), 2026-11-23 |
 | **Date** | 2026-11-23 |
 
 **Context:** F8. A test that fails with `error` fails the Dagster run. The failed-run release puts
@@ -369,7 +369,7 @@ in the pipeline that COST_GOVERNANCE is measuring. The owner of the data still s
    (COST_GOVERNANCE), and the reconciliation would then never run where the drift happens.
 
 **Consequences:**
-- This is an exception to ADR-0027. ADR-0031 records it, and the reviewer should challenge it.
+- This is an exception to ADR-0027. ADR-0031 records it. The owner accepted it; the reviewer may still challenge it.
 
 ---
 
@@ -377,7 +377,7 @@ in the pipeline that COST_GOVERNANCE is measuring. The owner of the data still s
 
 | Attribute | Value |
 |-----------|-------|
-| **Status** | Proposed — owner decision requested (changes the 15-day plan) |
+| **Status** | Accepted — owner (Christian), 2026-11-23; `_index.md` plan updated |
 | **Date** | 2026-11-23 |
 
 **Context:**
@@ -414,7 +414,7 @@ not negotiable. SCD2 adds work to every run, so it must arrive after the measure
 - The README's measured costs do not include the SCD2 models. The README states this (item 22 of
   COST_GOVERNANCE, shared file) and gives the Day 12 build's cost of the four new models as a
   separate line.
-- `_index.md`'s 15-day plan moves the SCD2 rows (Validate → Day 13, Ship → Day 14).
+- `_index.md`'s 15-day plan moved the SCD2 rows: Build offline on Days 7–11, real build on Day 12, Validate on Day 13, Ship on Day 14 (done 2026-11-23).
 
 ---
 
@@ -759,6 +759,7 @@ Day 12 build.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-11-23 | design-agent (Claude Code) | Initial version. F1 (no history in dbt Bronze) redirected the source to the raw table; the simulation found and fixed a backfill bug (Decision 6). Decisions 8 and 9 need owner review. |
+| 1.0.1 | 2026-11-23 | Christian (with Claude) | Owner approved Decisions 8 and 9; `_index.md` 15-day plan updated for Decision 9. No design change. |
 
 ---
 

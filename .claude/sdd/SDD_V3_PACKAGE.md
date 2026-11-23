@@ -214,7 +214,7 @@ runbooks, README with *What it actually costs*.
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
 | COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15, 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
-| SCD2_RESTAURANTS | Design — draft (1.0, 2026-11-23); independent review next. Build offline until Measurement B ends (DESIGN Decision 9) | [DEFINE](#part-8--define-scd2_restaurants) · [DESIGN](#part-9--design-scd2_restaurants) | Christian |
+| SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](#part-8--define-scd2_restaurants) · [DESIGN](#part-9--design-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
 
@@ -262,14 +262,14 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 |-----|-----------------|------------------|-------------|
 | 1 | ✅ Repo created, CI green. ✅ Account checked (new trial, no monitors, Gen1 available). ✅ Both DEFINEs approved. ✅ Trial ends Dec 17. | — | — |
 | 2 | ~~DESIGN + second-opinion review~~ — done on Day 1 (DESIGN 1.0 signed off 2026-11-18). Build items 1–4 started on Day 1; DESIGN 1.1 from the Build (F14). | — | FT-04 |
-| 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | DESIGN + review | — |
-| 5–6 | Build: serverless gate tasks, run-batching window, load generator | Build: fixture of restaurant changes, `scd2` strategy | FT-03 |
-| 7 | Dry run of the measurement protocol (½ day of each config) | Build: history model, current-state reconciliation, Gold consumer, contract, tests | — |
-| 8–9 | **Measurement A — v2 configuration** under the fixed load | Validate (independent session) | FT-01 |
-| 10–11 | **Measurement B — v3 configuration** under the same load | Ship + Retro | — |
-| 12 | Validate (independent session): queries, chart | — | FT-02 |
-| 13 | Ship: ADRs, runbooks (connector down; monitor suspended the warehouse) | — | FT-05 |
-| 14 | README *What it actually costs* rewritten with measured numbers. Retro. | — | — |
+| 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | ~~DESIGN + review~~ — slipped to Day 6 | — |
+| 5–6 | Build: serverless gate tasks, run-batching window, load generator | Day 6: DESIGN 1.0 (2026-11-23) + independent review | FT-03 |
+| 7 | Dry run of the measurement protocol (½ day of each config) | Build **offline** (DESIGN Decision 9): `scd2` strategy, models, tests, fixture, ADR draft; `dbt parse` + `pytest` + simulation only. PRs stay open | — |
+| 8–9 | **Measurement A — v2 configuration** under the fixed load | Build offline continues. **Nothing SCD2 on the account or Postgres** | FT-01 |
+| 10–11 | **Measurement B — v3 configuration** under the same load | Build offline continues. **Nothing SCD2 on the account or Postgres** | — |
+| 12 | Validate (independent session): queries, chart | From 2026-11-29 00:00 UTC: merge, apply fixture, `dbt build --vars '{scd2_strict: true}'` twice; record A-001/A-002/F4/F7 in BUILD_REPORT | FT-02 |
+| 13 | Ship: ADRs, runbooks (connector down; monitor suspended the warehouse) | Validate (independent session) | FT-05 |
+| 14 | README *What it actually costs* rewritten with measured numbers. Retro. | Ship + Retro (README SCD2 section after COST_GOVERNANCE's README edit; shared file) | — |
 | 15 | Buffer / polish. LinkedIn post #2 with the measured chart. | — | — |
 
 #### Open items before Day 1
@@ -2411,7 +2411,7 @@ other domain can follow when a business need appears.
 | **Date** | 2026-11-23 |
 | **Author** | design-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_SCD2_RESTAURANTS.md](#part-8--define-scd2_restaurants) — v1.1, Approved |
-| **Status** | 1.0 — Draft, awaiting independent review |
+| **Status** | 1.0.1 — Draft, awaiting independent review (Decisions 8–9 owner-approved) |
 
 ---
 
@@ -2747,7 +2747,7 @@ comes from `decimal.handling.mode = double`).
 
 | Attribute | Value |
 |-----------|-------|
-| **Status** | Proposed — owner review requested |
+| **Status** | Accepted — owner (Christian), 2026-11-23 |
 | **Date** | 2026-11-23 |
 
 **Context:** F8. A test that fails with `error` fails the Dagster run. The failed-run release puts
@@ -2769,7 +2769,7 @@ in the pipeline that COST_GOVERNANCE is measuring. The owner of the data still s
    (COST_GOVERNANCE), and the reconciliation would then never run where the drift happens.
 
 **Consequences:**
-- This is an exception to ADR-0027. ADR-0031 records it, and the reviewer should challenge it.
+- This is an exception to ADR-0027. ADR-0031 records it. The owner accepted it; the reviewer may still challenge it.
 
 ---
 
@@ -2777,7 +2777,7 @@ in the pipeline that COST_GOVERNANCE is measuring. The owner of the data still s
 
 | Attribute | Value |
 |-----------|-------|
-| **Status** | Proposed — owner decision requested (changes the 15-day plan) |
+| **Status** | Accepted — owner (Christian), 2026-11-23; `_index.md` plan updated |
 | **Date** | 2026-11-23 |
 
 **Context:**
@@ -2814,7 +2814,7 @@ not negotiable. SCD2 adds work to every run, so it must arrive after the measure
 - The README's measured costs do not include the SCD2 models. The README states this (item 22 of
   COST_GOVERNANCE, shared file) and gives the Day 12 build's cost of the four new models as a
   separate line.
-- `_index.md`'s 15-day plan moves the SCD2 rows (Validate → Day 13, Ship → Day 14).
+- `_index.md`'s 15-day plan moved the SCD2 rows: Build offline on Days 7–11, real build on Day 12, Validate on Day 13, Ship on Day 14 (done 2026-11-23).
 
 ---
 
@@ -3159,6 +3159,7 @@ Day 12 build.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-11-23 | design-agent (Claude Code) | Initial version. F1 (no history in dbt Bronze) redirected the source to the raw table; the simulation found and fixed a backfill bug (Decision 6). Decisions 8 and 9 need owner review. |
+| 1.0.1 | 2026-11-23 | Christian (with Claude) | Owner approved Decisions 8 and 9; `_index.md` 15-day plan updated for Decision 9. No design change. |
 
 ---
 
