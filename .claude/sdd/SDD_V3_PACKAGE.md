@@ -213,7 +213,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15, 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 19–22 with the owner; no apply yet (bootstrap, credit price, CI variables pending); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
 | SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](#part-8--define-scd2_restaurants) · [DESIGN](#part-9--design-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
