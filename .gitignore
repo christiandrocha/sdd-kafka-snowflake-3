@@ -51,8 +51,9 @@ screenstudio/
 demos/**/sample_image.jpg
 *.p8
 
-# Chaves Snowflake — o diretório inteiro, inclusive as .pub
+# Snowflake keys — the whole directory, .pub files included
 keys/
+credential/
 
 # ── Escopo deste repositório ────────────────────────────────────────────
 # Este repo público cobre apenas a stack Kafka → Snowflake.
@@ -77,6 +78,8 @@ docs/*
 # está, e os commits referenciam esses arquivos.
 !.claude/sdd/
 !.claude/skills/
+# Project permissions (deny rules for local key pairs). settings.local.json stays ignored.
+!.claude/settings.json
 # v3: CLAUDE.md and the Cursor rule are the agents' source of truth and are versioned.
 .cursor/*
 !.cursor/rules/

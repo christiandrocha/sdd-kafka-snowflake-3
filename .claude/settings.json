@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./keys/**)",
+      "Read(./credential/**)",
+      "Read(./**/*.p8)",
+      "Read(./**/*.pem)",
+      "Edit(./keys/**)",
+      "Edit(./credential/**)"
+    ]
+  }
+}
