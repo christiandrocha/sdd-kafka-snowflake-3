@@ -1,3 +1,10 @@
 # Generated, read-only copy of the SDD artifacts (tools/build_sdd_package.py).
 # Agents must read the source files instead — see CLAUDE.md.
 .claude/sdd/SDD_V3_PACKAGE.md
+
+# Local key pairs (never indexed or sent to the model). Keep keys outside the repo
+# when possible; these rules are a second line of defence.
+keys/
+credential/
+*.p8
+*.pem

@@ -1,0 +1,9 @@
+# Every build in docker-compose.yml uses `context: .`, so without this file the
+# whole repository (local key pairs and .env included) is sent to the Docker
+# daemon on each build. The Dockerfiles COPY only named paths, so nothing here
+# is needed by any image.
+keys/
+credential/
+*.p8
+*.pem
+.env
