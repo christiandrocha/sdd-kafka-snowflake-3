@@ -571,7 +571,7 @@ its method. The README states the number we got, not the number we hoped for.
 | F11 | The latest provider is **2.23.0**. `snowflake_table`, `snowflake_procedure_sql` and `snowflake_current_account` are **preview features**: they must be listed in the provider's `preview_features_enabled`, and "may have breaking changes in future releases, even without raising the major version". | provider schema 2.23.0, `preview_features_enabled` description (read 2026-11-18) | `terraform/platform` enables exactly `snowflake_table_resource` and `snowflake_procedure_sql_resource`; the exact provider version is pinned in `.terraform.lock.hcl` (Decision 4) and upgraded only by PR. Risk added. |
 | F12 | `snowflake_current_account` can set the account-level monitor (`resource_monitor`), but it is a preview resource and "external changes for this field won't be detected". | provider schema 2.23.0 (read 2026-11-18) | **Not used** (owner decision 2026-11-18): exception 3 stays as CI SQL (Decision 9). Recorded as a future alternative once the resource leaves preview. |
 | F13 | The provider has **no resource for budgets or budget custom actions** (154 resources in 2.23.0, none for budgets). | provider schema 2.23.0 (read 2026-11-18) | Exception 2 (`budget.sql`) confirmed. |
-| F14 | "Only users with the ACCOUNTADMIN role can create a resource monitor", "… can **assign warehouses** to resource monitors" and "… can set a resource monitor to monitor the account". A role with **MONITOR or MODIFY** on a monitor can see it in `SHOW RESOURCE MONITORS`. The provider's `snowflake_warehouse.resource_monitor` is a plain optional field (not computed), so an assignment made outside the warehouse resource shows as a diff on every plan. **Probe P1 (Appendix) — pending, run by the owner;** expected read-back in the F6 format: as `SYSADMIN`, `ALTER WAREHOUSE … SET RESOURCE_MONITOR` and `CREATE WAREHOUSE … RESOURCE_MONITOR =` fail with insufficient privileges; as `ACCOUNTADMIN` the `ALTER` succeeds and `SHOW WAREHOUSES` returns the monitor in `resource_monitor`. | Snowflake docs, [*Working with resource monitors* — Assigning warehouses to a resource monitor](https://docs.snowflake.com/en/user-guide/resource-monitors#assigning-warehouses-to-a-resource-monitor) and [Setting a resource monitor for your account](https://docs.snowflake.com/en/user-guide/resource-monitors#setting-a-resource-monitor-for-your-account); [`ALTER WAREHOUSE`, access control](https://docs.snowflake.com/en/sql-reference/sql/alter-warehouse) (read 2026-11-18); provider schema 2.23.0 | Pattern 2 as written in 1.0 (`provider = snowflake.sysadmin` with `resource_monitor`) cannot apply. `CDC_WH` is created by the `accountadmin` alias — a named exception in Decision 9. The read-only plan role gets MONITOR on both monitors (Decision 9). |
+| F14 | "Only users with the ACCOUNTADMIN role can create a resource monitor", "… can **assign warehouses** to resource monitors" and "… can set a resource monitor to monitor the account". A role with **MONITOR or MODIFY** on a monitor can see it in `SHOW RESOURCE MONITORS`. The provider's `snowflake_warehouse.resource_monitor` is a plain optional field (not computed), so an assignment made outside the warehouse resource shows as a diff on every plan. **Probe P1 (Appendix), run by the owner in Snowsight 2026-11-24:** P1.3 `ALTER WAREHOUSE PROBE_WH_P1 SET RESOURCE_MONITOR` as `ACCOUNTADMIN` → success; P1.4 `SHOW WAREHOUSES` → `resource_monitor = PROBE_RM_P1` on both warehouses, `STANDARD_GEN_1`. **P1.1 and P1.2 as `SYSADMIN` → success, owner `SYSADMIN` — inconclusive**: the owner's user has `DEFAULT_SECONDARY_ROLES = ["ALL"]`, so ACCOUNTADMIN counted for the privilege check while SYSADMIN, the primary role, took ownership. A rerun after `USE SECONDARY ROLES NONE` still read back `CURRENT_SECONDARY_ROLES() = {"roles":"ACCOUNTADMIN,ORGADMIN","value":"ALL"}` in the worksheet, so it proves nothing either way. Consequence: `00_terraform_bootstrap.sql` sets `DEFAULT_SECONDARY_ROLES = ()` on both service users (1.5), so each provider alias holds only its own role; the first apply with that setting is the real test of the SYSADMIN half. | Snowflake docs, [*Working with resource monitors* — Assigning warehouses to a resource monitor](https://docs.snowflake.com/en/user-guide/resource-monitors#assigning-warehouses-to-a-resource-monitor) and [Setting a resource monitor for your account](https://docs.snowflake.com/en/user-guide/resource-monitors#setting-a-resource-monitor-for-your-account); [`ALTER WAREHOUSE`, access control](https://docs.snowflake.com/en/sql-reference/sql/alter-warehouse) (read 2026-11-18); provider schema 2.23.0 | Pattern 2 as written in 1.0 (`provider = snowflake.sysadmin` with `resource_monitor`) cannot apply. `CDC_WH` is created by the `accountadmin` alias — a named exception in Decision 9. The read-only plan role gets MONITOR on both monitors (Decision 9). |
 | F15 | Credit price on this account: **USD 4.65** per credit (`WAREHOUSE_METERING`, `compute`), the same on 2026-11-17 and 2026-11-23 — the Enterprise on-demand rate for AWS São Paulo in third-party price tables. Remaining trial balance **USD 395.14** on 2026-11-24 (`free_usage_balance`; the view lags up to 24 h). *Admin → Billing* shows nothing on this trial. | `SNOWFLAKE.ORGANIZATION_USAGE.RATE_SHEET_DAILY`, `REMAINING_BALANCE_DAILY`, read by the owner in Snowsight 2026-11-24 | Balance ≈ **85 credits**, so the 1.2 worst case (~63 credits ≈ USD 293, 74%) breaks the ~50% rule of Decision 8. Limits lowered in 1.5 (Decision 8). |
 
 ---
@@ -1506,7 +1506,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 1.2 | 2026-11-18 | Christian (with Claude, Build session) | Items 5–6 Build, owner decisions: budget refresh `TIER_1H`; no cycle-start action; `budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role instead of ACCOUNTADMIN, so the `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list. F8 now from official docs (6.5 h default / 1 h; actual actions once a month, one retry); Decision 5/8 worst case recomputed (~1.5 credits overshoot, ~63 total). SNOWFLAKE database-role grant confirmed. New `CDC_CI_WH` for the CI SQL steps (validity rules; owner decision). Not reviewed by an independent session. |
 | 1.3 | 2026-11-18 | Christian (with Claude, Build session) | Items 16–18 Build, owner decisions: Decision 11 consequence recorded (approval before the job, so the apply re-plans and compares with the PR plan, warning only; pipeline-skip notice in the job summary; read-only key in `snowflake-dev` for `verify_governance.sql`; `BUDGET_NOTIFY_EMAIL` as a secret). AWS state bootstrap as a documented manual step with least-privilege OIDC roles and mandatory bucket versioning (Decision 12). Manifest item 16 lists its helpers and runbook. Item 15 stays with the owner; the build agent drafted `queries.sql` only. Not reviewed by an independent session. |
 | 1.4 | 2026-11-18 | Christian (with Claude, Build session) | Items 10–13 Build: Pattern 4 / Decision 6 corrected, because an empty starvation-guard query under continuous traffic made the sensor query every minute; it now restarts `pending_since` (simulation kept as a regression test). Decision 7: `assets.py` writes the run key; the sensor runs `UPDATE` first, then reads the rows it marked; a failed run's rows are released back to pending (reprocess, no automatic retry). `assets.py` owned by COST_GOVERNANCE (no other feature touches it); manifest item 12 points to it. Agent Assignment deviation: Claude Code builds 10–13. No scope change. |
-| 1.5 | 2026-11-24 | Christian (with Claude, Build session) | Owner decision after reading the credit price (F15: USD 4.65, balance USD 395.14 ≈ 85 credits): Decision 8 limits 25 / **30** / **5** (account monitor 40 → 30, budget 10 → 5, `CDC_WH` cap unchanged); worst case ~63 → ~43 credits (≈ USD 200, ~50%). `budget.sql`, `verify_governance.sql` and `dev.tfvars` follow. The first apply already sets `cost_profile = "baseline"` (PROTOCOL §9). No scope change. Not reviewed by an independent session. |
+| 1.5 | 2026-11-24 | Christian (with Claude, Build session) | Owner decision after reading the credit price (F15: USD 4.65, balance USD 395.14 ≈ 85 credits): Decision 8 limits 25 / **30** / **5** (account monitor 40 → 30, budget 10 → 5, `CDC_WH` cap unchanged); worst case ~63 → ~43 credits (≈ USD 200, ~50%). `budget.sql`, `verify_governance.sql` and `dev.tfvars` follow. The first apply already sets `cost_profile = "baseline"` (PROTOCOL §9). Probe P1 recorded in F14 (P1.3/P1.4 confirm the ACCOUNTADMIN path; P1.1/P1.2 inconclusive because of secondary roles); the Terraform service users get `DEFAULT_SECONDARY_ROLES = ()`. `owner_user_name` is `CHRISTIANDR` on this account. No scope change. Not reviewed by an independent session. |
 
 ---
 
@@ -1529,7 +1529,7 @@ recorded in the BUILD_REPORT.
 
 **Ready for:** the next `/sdd-build COST_GOVERNANCE` items (1–6 built, see the BUILD_REPORT). Build checklist items
 B1–B5 are closed during the Build on the Days listed. Probe P1 (Appendix) is run by the owner before
-the first apply (Day 3); its read-back replaces "pending" in F14.
+the first apply (Day 3); its read-back is recorded in F14 (2026-11-24, DESIGN 1.5).
 
 ---
 
@@ -2446,16 +2446,26 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 3. **The first apply sets `cost_profile = "baseline"`.** No apply happened before 12:00 UTC, so the
    dry run is void and not rerun (PROTOCOL §5); S0 becomes the first apply and S2 at 00:00 is a check
    only (PROTOCOL §4, §9).
+4. **Probe P1** run by the owner (DESIGN F14): the ACCOUNTADMIN path is confirmed; the SYSADMIN half is
+   inconclusive because the owner's session had ACCOUNTADMIN as a secondary role, and the Snowsight
+   worksheet kept it after `USE SECONDARY ROLES NONE`. **The Terraform service users get
+   `DEFAULT_SECONDARY_ROLES = ()`**: with the default `ALL`, the `sysadmin` alias would act with
+   ACCOUNTADMIN's privileges and Decision 9 would hold only in the code. Accepted risk: a resource
+   that silently needed more than its alias's role fails the first apply loudly.
+5. **`owner_user_name = "CHRISTIANDR"`**: `SHOW USERS` on this account (v2's name was
+   `CHRISTIANDROCHA`, which would have failed the monitors' `notify_users` and the governance grant).
 
 ##### Files
 
 | File | Change |
 |------|--------|
-| `terraform/env/dev.tfvars` | `cost_profile = "baseline"`; `account_monitor_quota = 30`; comment records the price, balance and worst case |
+| `terraform/env/dev.tfvars` | `cost_profile = "baseline"`; `account_monitor_quota = 30`; `owner_user_name = "CHRISTIANDR"`; comments record the price, balance and worst case |
 | `scripts/budget.sql` | `SET_SPENDING_LIMIT(5)`, header and read-back comment |
 | `scripts/verify_governance.sql` | Budget check expects 5 (it was hard-coded to 10: changing `budget.sql` alone would have failed the first apply's verify step with −20005) |
 | `tests/unit/test_sql_scripts.py` | Asserts `SET_SPENDING_LIMIT(5)` |
 | `.env.example` (shared) | `BATCH_WINDOW_MINUTES=0`, to stay equal to `dev.tfvars` on `main` as its comment requires |
+| `scripts/00_terraform_bootstrap.sql` | `DEFAULT_SECONDARY_ROLES = ()` in both `CREATE USER` and an idempotent `ALTER USER … SET`; read-back expects `default_secondary_roles = []` |
+| `tests/unit/test_sql_scripts.py` | + `test_bootstrap_service_users_have_no_secondary_roles` (mutation-checked: removing one `ALTER USER` fails it) |
 | `docs/measurement/PROTOCOL.md` | §4 switches S0–S2; §9 two rows (void dry run and its checks moved to A / B; new limits) |
 | DESIGN 1.5, DEFINE status and A-006, `_index` open item 7 | Records of the above |
 
@@ -2463,7 +2473,7 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 
 | Command | Result |
 |---------|--------|
-| `pytest tests/unit -q` · `ruff check .` · `build_sdd_package.py --check` | ✅ 211 passed · ✅ · ✅ up to date |
+| `pytest tests/unit -q` · `ruff check .` · `build_sdd_package.py --check` | ✅ 212 passed · ✅ · ✅ up to date |
 | `grep` for the old limits in code, scripts and tests | only historical rows of this report remain |
 
 ##### Open issues (closed / new)
@@ -2471,6 +2481,10 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 | # | Issue | Needed by | Owner |
 |---|-------|-----------|-------|
 | O1 | ~~Credit price~~ — **closed**: USD 4.65 (F15) | — | — |
+| O2 | ~~Probe P1~~ — **closed** with a caveat: ACCOUNTADMIN path confirmed, SYSADMIN half inconclusive (F14) | — | — |
+| O3 | `owner_user_name` — **name fixed**: `CHRISTIANDR`. E-mail present; whether it is *verified* is not shown by `SHOW USERS`, the owner checks it in Snowsight | Before the first apply | Christian |
+| O49 | First apply with `DEFAULT_SECONDARY_ROLES = ()`: if a resource on the `sysadmin` or `securityadmin` alias fails with insufficient privileges, that is a real Decision 9 gap. Fix it with the least grant, never by restoring `ALL` | First apply | build-agent |
+| O50 | Retro: is the SYSADMIN half of F14 still true? Rerun P1.1/P1.2 in a session that really has no secondary roles (e.g. `snow sql`). If SYSADMIN can assign monitors, the ACCOUNTADMIN exception for `CDC_WH` can go in v3.1 | Retro | Christian |
 | O21 | `gate_task_timeout_ms` stays at the provisional 10 000 ms for S3: with no dry run there are no serverless gate runs to calibrate it before B | S3 | Christian |
 | O47 | Dry-run checks D3, D5 and the S1 half of D10 need profile B; they are read from the first hours of B (PROTOCOL §9). The rest are read from the first hours of A | Windows A, B | Christian |
 | O48 | The balance view lags up to 24 h; re-read `REMAINING_BALANCE_DAILY` before a rerun raises any limit (Decision 8 rule) | Before a rerun | Christian |

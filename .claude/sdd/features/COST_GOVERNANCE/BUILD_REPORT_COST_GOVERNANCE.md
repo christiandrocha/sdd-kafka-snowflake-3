@@ -878,16 +878,26 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 3. **The first apply sets `cost_profile = "baseline"`.** No apply happened before 12:00 UTC, so the
    dry run is void and not rerun (PROTOCOL §5); S0 becomes the first apply and S2 at 00:00 is a check
    only (PROTOCOL §4, §9).
+4. **Probe P1** run by the owner (DESIGN F14): the ACCOUNTADMIN path is confirmed; the SYSADMIN half is
+   inconclusive because the owner's session had ACCOUNTADMIN as a secondary role, and the Snowsight
+   worksheet kept it after `USE SECONDARY ROLES NONE`. **The Terraform service users get
+   `DEFAULT_SECONDARY_ROLES = ()`**: with the default `ALL`, the `sysadmin` alias would act with
+   ACCOUNTADMIN's privileges and Decision 9 would hold only in the code. Accepted risk: a resource
+   that silently needed more than its alias's role fails the first apply loudly.
+5. **`owner_user_name = "CHRISTIANDR"`**: `SHOW USERS` on this account (v2's name was
+   `CHRISTIANDROCHA`, which would have failed the monitors' `notify_users` and the governance grant).
 
 ### Files
 
 | File | Change |
 |------|--------|
-| `terraform/env/dev.tfvars` | `cost_profile = "baseline"`; `account_monitor_quota = 30`; comment records the price, balance and worst case |
+| `terraform/env/dev.tfvars` | `cost_profile = "baseline"`; `account_monitor_quota = 30`; `owner_user_name = "CHRISTIANDR"`; comments record the price, balance and worst case |
 | `scripts/budget.sql` | `SET_SPENDING_LIMIT(5)`, header and read-back comment |
 | `scripts/verify_governance.sql` | Budget check expects 5 (it was hard-coded to 10: changing `budget.sql` alone would have failed the first apply's verify step with −20005) |
 | `tests/unit/test_sql_scripts.py` | Asserts `SET_SPENDING_LIMIT(5)` |
 | `.env.example` (shared) | `BATCH_WINDOW_MINUTES=0`, to stay equal to `dev.tfvars` on `main` as its comment requires |
+| `scripts/00_terraform_bootstrap.sql` | `DEFAULT_SECONDARY_ROLES = ()` in both `CREATE USER` and an idempotent `ALTER USER … SET`; read-back expects `default_secondary_roles = []` |
+| `tests/unit/test_sql_scripts.py` | + `test_bootstrap_service_users_have_no_secondary_roles` (mutation-checked: removing one `ALTER USER` fails it) |
 | `docs/measurement/PROTOCOL.md` | §4 switches S0–S2; §9 two rows (void dry run and its checks moved to A / B; new limits) |
 | DESIGN 1.5, DEFINE status and A-006, `_index` open item 7 | Records of the above |
 
@@ -895,7 +905,7 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 
 | Command | Result |
 |---------|--------|
-| `pytest tests/unit -q` · `ruff check .` · `build_sdd_package.py --check` | ✅ 211 passed · ✅ · ✅ up to date |
+| `pytest tests/unit -q` · `ruff check .` · `build_sdd_package.py --check` | ✅ 212 passed · ✅ · ✅ up to date |
 | `grep` for the old limits in code, scripts and tests | only historical rows of this report remain |
 
 ### Open issues (closed / new)
@@ -903,6 +913,10 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 | # | Issue | Needed by | Owner |
 |---|-------|-----------|-------|
 | O1 | ~~Credit price~~ — **closed**: USD 4.65 (F15) | — | — |
+| O2 | ~~Probe P1~~ — **closed** with a caveat: ACCOUNTADMIN path confirmed, SYSADMIN half inconclusive (F14) | — | — |
+| O3 | `owner_user_name` — **name fixed**: `CHRISTIANDR`. E-mail present; whether it is *verified* is not shown by `SHOW USERS`, the owner checks it in Snowsight | Before the first apply | Christian |
+| O49 | First apply with `DEFAULT_SECONDARY_ROLES = ()`: if a resource on the `sysadmin` or `securityadmin` alias fails with insufficient privileges, that is a real Decision 9 gap. Fix it with the least grant, never by restoring `ALL` | First apply | build-agent |
+| O50 | Retro: is the SYSADMIN half of F14 still true? Rerun P1.1/P1.2 in a session that really has no secondary roles (e.g. `snow sql`). If SYSADMIN can assign monitors, the ACCOUNTADMIN exception for `CDC_WH` can go in v3.1 | Retro | Christian |
 | O21 | `gate_task_timeout_ms` stays at the provisional 10 000 ms for S3: with no dry run there are no serverless gate runs to calibrate it before B | S3 | Christian |
 | O47 | Dry-run checks D3, D5 and the S1 half of D10 need profile B; they are read from the first hours of B (PROTOCOL §9). The rest are read from the first hours of A | Windows A, B | Christian |
 | O48 | The balance view lags up to 24 h; re-read `REMAINING_BALANCE_DAILY` before a rerun raises any limit (Decision 8 rule) | Before a rerun | Christian |

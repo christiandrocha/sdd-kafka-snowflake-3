@@ -180,5 +180,6 @@ def test_bootstrap_service_users_have_no_secondary_roles():
     for user in ("TERRAFORM_SVC", "TERRAFORM_PLAN_SVC"):
         create = re.search(rf"CREATE USER IF NOT EXISTS {user}\b(.*?);", sql, re.S)
         assert create and re.search(r"DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)", create.group(1)), user
-        assert re.search(rf"ALTER USER {user}\s+SET DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)\s*;", sql), user
+        alter = rf"ALTER USER {user}\s+SET DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)\s*;"
+        assert re.search(alter, sql), user
     assert "'ALL'" not in sql
