@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 21 drafted by the build agent and merged (#16, 2026-11-23); 19, 22 with the owner; no apply yet (bootstrap, credit price, CI secrets and remaining variables pending; `main` ruleset and non-secret variables set 2026-11-23); DESIGN 1.4 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 21 drafted by the build agent and merged (#16, 2026-11-23); 19, 22 with the owner; credit price read and limits 25 / 30 / 5 + first apply in `baseline` drafted (run 10, 2026-11-24); dry run void (PROTOCOL §9); no apply yet (bootstrap, CI secrets and remaining variables pending; `main` ruleset and non-secret variables set 2026-11-23); DESIGN 1.5 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) · [DESIGN](features/SCD2_RESTAURANTS/DESIGN_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -68,7 +68,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 2 | ~~DESIGN + second-opinion review~~ — done on Day 1 (DESIGN 1.0 signed off 2026-11-18). Build items 1–4 started on Day 1; DESIGN 1.1 from the Build (F14). | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | ~~DESIGN + review~~ — slipped to Day 6 | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Day 6: DESIGN 1.0 (2026-11-23) + independent review | FT-03 |
-| 7 | Dry run of the measurement protocol (½ day of each config) | Build **offline** (DESIGN Decision 9): `scd2` strategy, models, tests, fixture, ADR draft; `dbt parse` + `pytest` + simulation only. PRs stay open | — |
+| 7 | ~~Dry run of the measurement protocol (½ day of each config)~~ — void: no apply before 12:00 UTC; its checks move to the first hours of A and B (PROTOCOL §9) | Build **offline** (DESIGN Decision 9): `scd2` strategy, models, tests, fixture, ADR draft; `dbt parse` + `pytest` + simulation only. PRs stay open | — |
 | 8–9 | **Measurement A — v2 configuration** under the fixed load | Build offline continues. **Nothing SCD2 on the account or Postgres** | FT-01 |
 | 10–11 | **Measurement B — v3 configuration** under the same load | Build offline continues. **Nothing SCD2 on the account or Postgres** | — |
 | 12 | Validate (independent session): queries, chart | From 2026-11-29 00:00 UTC: merge, apply fixture, `dbt build --vars '{scd2_strict: true}'` twice; record A-001/A-002/F4/F7 in BUILD_REPORT | FT-02 |
@@ -83,7 +83,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
 | 2 | ~~Credit budget for the A/B measurement~~ — resolved: 25 credits on the `CDC_WH` monitor (owner decision) | Resolved | — |
 | 6 | ~~Trial end date and balance~~ — resolved: 2026-12-17, USD 400 | Resolved | — |
-| 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (planned Day 3, slipped; now needed before the Day 7 dry run) | Lower the limits if 60 credits > 50% of the balance |
+| 7 | ~~Credit price for this edition/region~~ — resolved 2026-11-24: USD 4.65 (`RATE_SHEET_DAILY`; *Admin → Billing* is empty on the trial); balance USD 395.14; limits lowered to 25 / 30 / 5 (DESIGN 1.5) | Resolved | — |
 | 3 | ~~Repository name~~ — resolved: repository `sdd-kafka-snowflake-3` created 2026-11-17 | Resolved | — |
 | 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | ~~Terraform state backend~~ — resolved: S3 with native lockfile, no DynamoDB (DESIGN Decision 12) | Resolved | — |

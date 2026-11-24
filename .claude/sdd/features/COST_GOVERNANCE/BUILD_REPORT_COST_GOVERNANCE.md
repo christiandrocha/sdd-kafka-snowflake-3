@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9) and merged (#16, 2026-11-23); 19, 22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9) and merged (#16, 2026-11-23); 19, 22 pending (owner-authored / shared); run 10 (2026-11-24): credit price read (O1 closed), limits 25 / 30 / 5 and `cost_profile = "baseline"` for the first apply (DESIGN 1.5); no apply yet |
 
 ---
 
@@ -860,11 +860,60 @@ workflow runs only on Terraform paths. A docs-only PR would wait for them foreve
 
 ---
 
+## Run 10 — 2026-11-24 — credit price, Decision 8 limits, first apply in `baseline`
+
+Branch `feat/cost-governance-credit-limits`, from `main` (`3b6c524`). Requirements: **REQ-07**
+(measurement protocol: profile of the first apply, void dry run), **REQ-08** (spending limits applied
+through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independent session).
+**Shared file touched: `.env.example`.**
+
+### Owner decisions (2026-11-24)
+
+1. **Credit price read** by the owner in Snowsight (*Admin → Billing* is empty on this trial):
+   `ORGANIZATION_USAGE.RATE_SHEET_DAILY` → **USD 4.65** (`WAREHOUSE_METERING`, `compute`, 2026-11-17
+   and 2026-11-23); `REMAINING_BALANCE_DAILY` → **USD 395.14** on 2026-11-24 (≈ 85 credits). DESIGN F15.
+2. **Limits 25 / 30 / 5** (`CDC_WH` monitor unchanged, account monitor 40 → 30, budget 10 → 5 per
+   month). Worst case ~63 → **~43 credits ≈ USD 200**, ~50% of the balance. Rejected: 20 / 25 / 5
+   (too little room for a rerun) and keeping 25 / 40 / 10 (74% of the balance).
+3. **The first apply sets `cost_profile = "baseline"`.** No apply happened before 12:00 UTC, so the
+   dry run is void and not rerun (PROTOCOL §5); S0 becomes the first apply and S2 at 00:00 is a check
+   only (PROTOCOL §4, §9).
+
+### Files
+
+| File | Change |
+|------|--------|
+| `terraform/env/dev.tfvars` | `cost_profile = "baseline"`; `account_monitor_quota = 30`; comment records the price, balance and worst case |
+| `scripts/budget.sql` | `SET_SPENDING_LIMIT(5)`, header and read-back comment |
+| `scripts/verify_governance.sql` | Budget check expects 5 (it was hard-coded to 10: changing `budget.sql` alone would have failed the first apply's verify step with −20005) |
+| `tests/unit/test_sql_scripts.py` | Asserts `SET_SPENDING_LIMIT(5)` |
+| `.env.example` (shared) | `BATCH_WINDOW_MINUTES=0`, to stay equal to `dev.tfvars` on `main` as its comment requires |
+| `docs/measurement/PROTOCOL.md` | §4 switches S0–S2; §9 two rows (void dry run and its checks moved to A / B; new limits) |
+| DESIGN 1.5, DEFINE status and A-006, `_index` open item 7 | Records of the above |
+
+### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `pytest tests/unit -q` · `ruff check .` · `build_sdd_package.py --check` | ✅ 211 passed · ✅ · ✅ up to date |
+| `grep` for the old limits in code, scripts and tests | only historical rows of this report remain |
+
+### Open issues (closed / new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O1 | ~~Credit price~~ — **closed**: USD 4.65 (F15) | — | — |
+| O21 | `gate_task_timeout_ms` stays at the provisional 10 000 ms for S3: with no dry run there are no serverless gate runs to calibrate it before B | S3 | Christian |
+| O47 | Dry-run checks D3, D5 and the S1 half of D10 need profile B; they are read from the first hours of B (PROTOCOL §9). The rest are read from the first hours of A | Windows A, B | Christian |
+| O48 | The balance view lags up to 24 h; re-read `REMAINING_BALANCE_DAILY` before a rerun raises any limit (Decision 8 rule) | Before a rerun | Christian |
+
+---
+
 ## Next Step
 
 Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 merged in #14, `3ea3c29`, CI green; `test_makefile.py` added to the `_index` ownership map). Item 15 drafted in
 run 7 and merged (#10); item 21 drafted in run 9 and merged (#16, `c46e6f8`, CI green through the new `main` ruleset). Remaining: 19 (runbooks), 22 (README,
-Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
+Day 14) — owner-authored. **Needed before window A (2026-11-25 00:00 UTC; the dry run is void, run 10):** state
 backend bootstrap, Terraform identities, the rest of the repository variables and every secret (O39), then the first apply
 through CI with approval (O43).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.

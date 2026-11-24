@@ -94,9 +94,9 @@ Switches:
 
 | # | When (UTC) | To | PR also carries |
 |---|------------|----|-----------------|
-| S0 | before 2026-11-24 12:00 | `baseline`, N = 0 | — |
-| S1 | 2026-11-24 15:00 | `optimized`, N = 10 | — |
-| S2 | **2026-11-25 00:00** | `baseline`, N = 0 | dry-run recalibrations, if any (§7) |
+| S0 | ~~before 2026-11-24 12:00~~ → **the first apply** (before 2026-11-25 00:00) | `baseline`, N = 0 | Decision 8 limits (DESIGN 1.5); see §9 |
+| S1 | ~~2026-11-24 15:00~~ — not done (no dry run, §9) | — | — |
+| S2 | **2026-11-25 00:00** | `baseline`, N = 0 — already in place since S0; no PR, no apply. Log `S2,no_change` in `switch.log` after checking that the last apply ran `verify_governance.sql` OK and that `.env` has `BATCH_WINDOW_MINUTES=0` | — (no dry-run recalibrations) |
 | S3 | **2026-11-27 00:00** | `optimized`, N = 10 | `gate_task_timeout_ms` from the dry run (O21), since only profile B applies it |
 
 Steps for each switch. Prepare the PR in advance. Never apply locally (Constitution R1).
@@ -213,3 +213,5 @@ redeploy and rerun the protocol on another account.
 | Date (UTC) | Change | Reason | Windows affected |
 |------------|--------|--------|------------------|
 | 2026-11-23 | First version, before the dry run | — | — |
+| 2026-11-24 | **Dry run void, not rerun** (§5). S1 not done. S0 moves to the first apply, which already sets `cost_profile = "baseline"`, so S2 at 00:00 is a check only (§4). The §7 checks that need profile A only (D1, D2, D4, D6, D7, D9, D11, D12) are read from the first hours of A; D3, D5 and the S1 half of D10 need profile B and are read from the first hours of B. The load parameters stay at their defaults. S3 keeps `gate_task_timeout_ms` at its provisional 10 000 ms (O21): there are no serverless gate runs before B to calibrate it. | No apply had happened before 12:00 UTC (BUILD_REPORT O43). | Dry run |
+| 2026-11-24 | Decision 8 limits lowered to 25 / 30 / 5 (DESIGN 1.5) after the credit price was read: USD 4.65. A rerun that raises `cdc_wh_monitor_quota` above 25 also needs `account_monitor_quota` raised, keeping the worst case under ~50% (§5). | Price above the USD 3–4 the DESIGN assumed. | A, B, reruns |

@@ -121,7 +121,7 @@ def test_budget_is_idempotent_and_matches_design():
     assert "CREATE SNOWFLAKE.CORE.BUDGET IF NOT EXISTS" in sql
     assert sql.index("REMOVE_CUSTOM_ACTIONS()") < sql.index("ADD_CUSTOM_ACTION(")
     assert re.search(r"'ACTUAL',\s*100\)", sql)  # Decision 5
-    assert "SET_SPENDING_LIMIT(10)" in sql  # Decision 8
+    assert "SET_SPENDING_LIMIT(5)" in sql  # Decision 8 (DESIGN 1.5)
     assert "SET_REFRESH_TIER('TIER_1H')" in sql  # F8, owner decision
     assert "REMOVE_CYCLE_START_ACTION()" in sql  # no cycle-start action
     assert "SET_CYCLE_START_ACTION" not in sql
