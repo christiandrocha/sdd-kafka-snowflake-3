@@ -17,7 +17,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 21 drafted by the build agent and merged (#16, 2026-11-23); 19, 22 with the owner; credit price read and limits 25 / 30 / 5 + first apply in `baseline` drafted (run 10, 2026-11-24); dry run void (PROTOCOL §9); no apply yet (bootstrap, CI secrets and remaining variables pending; `main` ruleset and non-secret variables set 2026-11-23); DESIGN 1.5 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 21 drafted by the build agent and merged (#16, 2026-11-23); 19, 22 with the owner; credit price read and limits 25 / 30 / 5 + first apply in `baseline` drafted (run 10, 2026-11-24); dry run void and **measurement postponed 24 h** to A 2026-11-26 00:00 UTC (no AWS account for the state backend yet; PROTOCOL §9); no apply yet (bootstrap, CI secrets and remaining variables pending; `main` ruleset and non-secret variables set 2026-11-23); DESIGN 1.5 | [DEFINE](features/COST_GOVERNANCE/DEFINE_COST_GOVERNANCE.md) · [DESIGN](features/COST_GOVERNANCE/DESIGN_COST_GOVERNANCE.md) | Christian |
 | SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](features/SCD2_RESTAURANTS/DEFINE_SCD2_RESTAURANTS.md) · [DESIGN](features/SCD2_RESTAURANTS/DESIGN_SCD2_RESTAURANTS.md) | Christian |
 
 ## Fast tracks (mini-DEFINEs)
@@ -59,7 +59,7 @@ one PR at a time.
 
 ## 15-day plan
 
-Day 1 = **2026-11-18** → Day 8–11 (measurement) = **Nov 25–28** · Day 15 (showable) = **Dec 2** · trial ends **Dec 17**. Days 8–11 are inelastic: the A/B measurement needs calendar days of
+Day 1 = **2026-11-18** → Day 9–12 (measurement) = **Nov 26–29** (UTC windows A 11-26 00:00 → B ends 11-30 00:00; postponed +24 h on 2026-11-24, PROTOCOL §9 — the Day rows below still show the original days; read the measurement rows one day later) · Day 15 (showable) = **Dec 2** (Dec 3 if a window is rerun) · trial ends **Dec 17**. The measurement days are inelastic: the A/B measurement needs calendar days of
 controlled load. Any slip in week 1 comes out of week 2's polish, never out of the measurement.
 
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
@@ -71,7 +71,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 7 | ~~Dry run of the measurement protocol (½ day of each config)~~ — void: no apply before 12:00 UTC; its checks move to the first hours of A and B (PROTOCOL §9) | Build **offline** (DESIGN Decision 9): `scd2` strategy, models, tests, fixture, ADR draft; `dbt parse` + `pytest` + simulation only. PRs stay open | — |
 | 8–9 | **Measurement A — v2 configuration** under the fixed load | Build offline continues. **Nothing SCD2 on the account or Postgres** | FT-01 |
 | 10–11 | **Measurement B — v3 configuration** under the same load | Build offline continues. **Nothing SCD2 on the account or Postgres** | — |
-| 12 | Validate (independent session): queries, chart | From 2026-11-29 00:00 UTC: merge, apply fixture, `dbt build --vars '{scd2_strict: true}'` twice; record A-001/A-002/F4/F7 in BUILD_REPORT | FT-02 |
+| 12 | Validate (independent session): queries, chart | From 2026-11-30 00:00 UTC: merge, apply fixture, `dbt build --vars '{scd2_strict: true}'` twice; record A-001/A-002/F4/F7 in BUILD_REPORT | FT-02 |
 | 13 | Ship: ADRs, runbooks (connector down; monitor suspended the warehouse) | Validate (independent session) | FT-05 |
 | 14 | README *What it actually costs* rewritten with measured numbers. Retro. | Ship + Retro (README SCD2 section after COST_GOVERNANCE's README edit; shared file) | — |
 | 15 | Buffer / polish. LinkedIn post #2 with the measured chart. | — | — |

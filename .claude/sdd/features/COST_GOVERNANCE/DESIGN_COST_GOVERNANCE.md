@@ -596,13 +596,13 @@ The generator writes `docs/measurement/runs/<window>/commits.csv` (`burst_id, co
 | Window | Start (UTC) | End (UTC) | Profile | Load |
 |--------|-------------|-----------|---------|------|
 | Dry run | 2026-11-24 12:00 | 2026-11-24 18:00 | A 3 h, then B 3 h | on |
-| A | **2026-11-25 00:00** | **2026-11-27 00:00** | baseline | on |
-| B | 2026-11-27 00:00 | 2026-11-29 00:00 | optimized | on |
-| Idle | 2026-11-29 00:00 | 2026-11-29 06:00 | optimized | **off** (idle criterion, F3) |
-| Read results | ≥ 2026-11-29 10:00 | — | — | `ACCOUNT_USAGE` latency |
+| A | **2026-11-26 00:00** | **2026-11-28 00:00** | baseline | on |
+| B | 2026-11-28 00:00 | 2026-11-30 00:00 | optimized | on |
+| Idle | 2026-11-30 00:00 | 2026-11-30 06:00 | optimized | **off** (idle criterion, F3) |
+| Read results | ≥ 2026-11-30 10:00 | — | — | `ACCOUNT_USAGE` latency |
 
-In Vitória time, the measurement ends on 2026-11-28 at 21:00 and the idle window on 2026-11-29 at
-03:00 — consistent with the `_index` plan (Days 8–11 = Nov 25–28 local).
+In Vitória time, the measurement ends on 2026-11-29 at 21:00 and the idle window on 2026-11-30 at
+03:00 — consistent with the `_index` plan (Days 9–12 = Nov 26–29 local; postponed +24 h in 1.5, PROTOCOL §9).
 
 **Predictions, written before measuring:**
 
@@ -967,7 +967,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 1.2 | 2026-11-18 | Christian (with Claude, Build session) | Items 5–6 Build, owner decisions: budget refresh `TIER_1H`; no cycle-start action; `budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role instead of ACCOUNTADMIN, so the `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list. F8 now from official docs (6.5 h default / 1 h; actual actions once a month, one retry); Decision 5/8 worst case recomputed (~1.5 credits overshoot, ~63 total). SNOWFLAKE database-role grant confirmed. New `CDC_CI_WH` for the CI SQL steps (validity rules; owner decision). Not reviewed by an independent session. |
 | 1.3 | 2026-11-18 | Christian (with Claude, Build session) | Items 16–18 Build, owner decisions: Decision 11 consequence recorded (approval before the job, so the apply re-plans and compares with the PR plan, warning only; pipeline-skip notice in the job summary; read-only key in `snowflake-dev` for `verify_governance.sql`; `BUDGET_NOTIFY_EMAIL` as a secret). AWS state bootstrap as a documented manual step with least-privilege OIDC roles and mandatory bucket versioning (Decision 12). Manifest item 16 lists its helpers and runbook. Item 15 stays with the owner; the build agent drafted `queries.sql` only. Not reviewed by an independent session. |
 | 1.4 | 2026-11-18 | Christian (with Claude, Build session) | Items 10–13 Build: Pattern 4 / Decision 6 corrected, because an empty starvation-guard query under continuous traffic made the sensor query every minute; it now restarts `pending_since` (simulation kept as a regression test). Decision 7: `assets.py` writes the run key; the sensor runs `UPDATE` first, then reads the rows it marked; a failed run's rows are released back to pending (reprocess, no automatic retry). `assets.py` owned by COST_GOVERNANCE (no other feature touches it); manifest item 12 points to it. Agent Assignment deviation: Claude Code builds 10–13. No scope change. |
-| 1.5 | 2026-11-24 | Christian (with Claude, Build session) | Owner decision after reading the credit price (F15: USD 4.65, balance USD 395.14 ≈ 85 credits): Decision 8 limits 25 / **30** / **5** (account monitor 40 → 30, budget 10 → 5, `CDC_WH` cap unchanged); worst case ~63 → ~43 credits (≈ USD 200, ~50%). `budget.sql`, `verify_governance.sql` and `dev.tfvars` follow. The first apply already sets `cost_profile = "baseline"` (PROTOCOL §9). Probe P1 recorded in F14 (P1.3/P1.4 confirm the ACCOUNTADMIN path; P1.1/P1.2 inconclusive because of secondary roles); the Terraform service users get `DEFAULT_SECONDARY_ROLES = ()`. `owner_user_name` is `CHRISTIANDR` on this account. No scope change. Not reviewed by an independent session. |
+| 1.5 | 2026-11-24 | Christian (with Claude, Build session) | Owner decision after reading the credit price (F15: USD 4.65, balance USD 395.14 ≈ 85 credits): Decision 8 limits 25 / **30** / **5** (account monitor 40 → 30, budget 10 → 5, `CDC_WH` cap unchanged); worst case ~63 → ~43 credits (≈ USD 200, ~50%). `budget.sql`, `verify_governance.sql` and `dev.tfvars` follow. The first apply already sets `cost_profile = "baseline"` (PROTOCOL §9). Probe P1 recorded in F14 (P1.3/P1.4 confirm the ACCOUNTADMIN path; P1.1/P1.2 inconclusive because of secondary roles); the Terraform service users get `DEFAULT_SECONDARY_ROLES = ()`. `owner_user_name` is `CHRISTIANDR` on this account. Measurement postponed by 24 h (A 2026-11-26 00:00 UTC): Decision 12 assumed an AWS account the owner did not have (PROTOCOL §9). No scope change. Not reviewed by an independent session. |
 
 ---
 

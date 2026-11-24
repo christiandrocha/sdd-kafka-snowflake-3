@@ -10,10 +10,10 @@
 -- PROTOCOL.md §7 lists them. None is a decision left open.
 --
 -- HOW TO RUN (PROTOCOL.md §6)
---   * Final reading from >= 2026-11-29 10:00 UTC: WAREHOUSE_EVENTS_HISTORY
+--   * Final reading from >= 2026-11-30 10:00 UTC: WAREHOUSE_EVENTS_HISTORY
 --     and METERING_DAILY_HISTORY have up to 3 h of latency (Snowflake docs).
---   * Warehouse: CDC_WH, and ONLY when no window is open (the dry-run
---     evening before 2026-11-25 00:00 UTC, or after the idle window). The
+--   * Warehouse: CDC_WH, and ONLY when no window is open (the
+--     evening before 2026-11-26 00:00 UTC, or after the idle window). The
 --     queries' own CDC_WH credits then fall outside every window. Never run
 --     them on CDC_WH during A, B or idle: that voids the window.
 --   * Roles: CDC_GOVERNANCE_RO reads SNOWFLAKE.ACCOUNT_USAGE (Q0–Q5, Q7, Q8);
@@ -29,12 +29,12 @@ USE WAREHOUSE CDC_WH;  -- only outside the windows (HOW TO RUN)
 
 -- Windows (UTC) — DESIGN, Measurement plan. A rerun moves these (PROTOCOL.md §5).
 -- a_start must be at an EVEN hour: Q5 buckets clusters in 2 h steps from it.
-SET a_start    = '2026-11-25 00:00:00'::TIMESTAMP_NTZ;
-SET a_end      = '2026-11-27 00:00:00'::TIMESTAMP_NTZ;
-SET b_start    = '2026-11-27 00:00:00'::TIMESTAMP_NTZ;
-SET b_end      = '2026-11-29 00:00:00'::TIMESTAMP_NTZ;
-SET idle_start = '2026-11-29 00:00:00'::TIMESTAMP_NTZ;
-SET idle_end   = '2026-11-29 06:00:00'::TIMESTAMP_NTZ;
+SET a_start    = '2026-11-26 00:00:00'::TIMESTAMP_NTZ;
+SET a_end      = '2026-11-28 00:00:00'::TIMESTAMP_NTZ;
+SET b_start    = '2026-11-28 00:00:00'::TIMESTAMP_NTZ;
+SET b_end      = '2026-11-30 00:00:00'::TIMESTAMP_NTZ;
+SET idle_start = '2026-11-30 00:00:00'::TIMESTAMP_NTZ;
+SET idle_end   = '2026-11-30 06:00:00'::TIMESTAMP_NTZ;
 
 -- Dry run (2026-11-24): replace the block above with
 --   SET a_start = '2026-11-24 12:00:00'::TIMESTAMP_NTZ;  SET a_end = '2026-11-24 15:00:00'::TIMESTAMP_NTZ;
@@ -259,8 +259,8 @@ USE ROLE CDC_ROLE_RO;
 
 WITH commits (burst_id, committed_at_utc, rows_affected) AS (
     SELECT * FROM VALUES
-     ('c20261127T0030-b0', '2026-11-27T00:30:00.412+00:00'::TIMESTAMP_NTZ, 200)   -- example rows:
-    ,('c20261127T0030-b1', '2026-11-27T00:32:00.101+00:00'::TIMESTAMP_NTZ, 200)   -- replace them
+     ('c20261128T0030-b0', '2026-11-28T00:30:00.412+00:00'::TIMESTAMP_NTZ, 200)   -- example rows:
+    ,('c20261128T0030-b1', '2026-11-28T00:32:00.101+00:00'::TIMESTAMP_NTZ, 200)   -- replace them
 ),
 detections AS (
     SELECT CONVERT_TIMEZONE($detected_at_tz, 'UTC', detected_at) AS detected_at_utc,

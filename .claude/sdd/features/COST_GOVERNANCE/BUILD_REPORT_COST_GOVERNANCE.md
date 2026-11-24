@@ -11,7 +11,7 @@
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](./DEFINE_COST_GOVERNANCE.md) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](./DESIGN_COST_GOVERNANCE.md) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9) and merged (#16, 2026-11-23); 19, 22 pending (owner-authored / shared); run 10 (2026-11-24): credit price read (O1 closed), limits 25 / 30 / 5 and `cost_profile = "baseline"` for the first apply (DESIGN 1.5); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-26 00:00 UTC since run 10); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9) and merged (#16, 2026-11-23); 19, 22 pending (owner-authored / shared); run 10 (2026-11-24): credit price read (O1 closed), limits 25 / 30 / 5 and `cost_profile = "baseline"` for the first apply (DESIGN 1.5); no apply yet |
 
 ---
 
@@ -886,6 +886,12 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
    that silently needed more than its alias's role fails the first apply loudly.
 5. **`owner_user_name = "CHRISTIANDR"`**: `SHOW USERS` on this account (v2's name was
    `CHRISTIANDROCHA`, which would have failed the monitors' `notify_users` and the governance grant).
+6. **Measurement postponed by 24 h**: A 2026-11-26 00:00 → 11-28 00:00 UTC, B → 11-30 00:00, idle →
+   11-30 06:00. The owner has no AWS account for the state backend (O51) and creates it on 2026-11-25;
+   with ~6 h left before the original A, the remaining steps did not fit. Dates moved in PROTOCOL,
+   `queries.sql`, `RESULTS_TEMPLATE.md`, `Makefile`, `generate_load.py` (docstring),
+   `test_makefile.py`, `CLAUDE.md`, `_index`, DESIGN and DEFINE. `DESIGN_SCD2_RESTAURANTS.md` is not
+   touched (other feature, under review); its embargo is tied to "until B ends", now 2026-11-30 00:00 UTC.
 
 ### Files
 
@@ -895,6 +901,7 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 | `scripts/budget.sql` | `SET_SPENDING_LIMIT(5)`, header and read-back comment |
 | `scripts/verify_governance.sql` | Budget check expects 5 (it was hard-coded to 10: changing `budget.sql` alone would have failed the first apply's verify step with −20005) |
 | `tests/unit/test_sql_scripts.py` | Asserts `SET_SPENDING_LIMIT(5)` |
+| `Makefile` (shared), `CLAUDE.md` (shared), `docs/measurement/{queries.sql,RESULTS_TEMPLATE.md}`, `tests/load/generate_load.py`, `tests/unit/test_makefile.py` | Window dates +24 h (decision 6) |
 | `.env.example` (shared) | `BATCH_WINDOW_MINUTES=0`, to stay equal to `dev.tfvars` on `main` as its comment requires |
 | `scripts/00_terraform_bootstrap.sql` | `DEFAULT_SECONDARY_ROLES = ()` in both `CREATE USER` and an idempotent `ALTER USER … SET`; read-back expects `default_secondary_roles = []` |
 | `tests/unit/test_sql_scripts.py` | + `test_bootstrap_service_users_have_no_secondary_roles` (mutation-checked: removing one `ALTER USER` fails it) |
@@ -915,6 +922,7 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 | O1 | ~~Credit price~~ — **closed**: USD 4.65 (F15) | — | — |
 | O2 | ~~Probe P1~~ — **closed** with a caveat: ACCOUNTADMIN path confirmed, SYSADMIN half inconclusive (F14) | — | — |
 | O3 | `owner_user_name` — **name fixed**: `CHRISTIANDR`. E-mail present; whether it is *verified* is not shown by `SHOW USERS`, the owner checks it in Snowsight | Before the first apply | Christian |
+| O51 | **Decision 12 assumed an AWS account that did not exist.** The owner chose Snowflake on AWS, which gives no AWS account. Creating one (S3 cost < USD 0.05/month; CloudShell, no CLI install; USD 1 AWS Budget alert) on 2026-11-25, then runbook §1–4. Retro: check every external-account assumption at DEFINE | 2026-11-25 | Christian |
 | O49 | First apply with `DEFAULT_SECONDARY_ROLES = ()`: if a resource on the `sysadmin` or `securityadmin` alias fails with insufficient privileges, that is a real Decision 9 gap. Fix it with the least grant, never by restoring `ALL` | First apply | build-agent |
 | O50 | Retro: is the SYSADMIN half of F14 still true? Rerun P1.1/P1.2 in a session that really has no secondary roles (e.g. `snow sql`). If SYSADMIN can assign monitors, the ACCOUNTADMIN exception for `CDC_WH` can go in v3.1 | Retro | Christian |
 | O21 | `gate_task_timeout_ms` stays at the provisional 10 000 ms for S3: with no dry run there are no serverless gate runs to calibrate it before B | S3 | Christian |
@@ -927,7 +935,7 @@ through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independ
 
 Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 merged in #14, `3ea3c29`, CI green; `test_makefile.py` added to the `_index` ownership map). Item 15 drafted in
 run 7 and merged (#10); item 21 drafted in run 9 and merged (#16, `c46e6f8`, CI green through the new `main` ruleset). Remaining: 19 (runbooks), 22 (README,
-Day 14) — owner-authored. **Needed before window A (2026-11-25 00:00 UTC; the dry run is void, run 10):** state
+Day 14) — owner-authored. **Needed before window A (2026-11-26 00:00 UTC; the dry run is void and the measurement postponed, run 10):** AWS account (O51), state
 backend bootstrap, Terraform identities, the rest of the repository variables and every secret (O39), then the first apply
 through CI with approval (O43).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.

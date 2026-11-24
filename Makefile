@@ -32,10 +32,10 @@ produce-dry-run:
 # checks that the two stay identical. A rerun (PROTOCOL §5) edits both.
 LOAD_START_dry-run := 2026-11-24T12:00Z
 LOAD_END_dry-run   := 2026-11-24T18:00Z
-LOAD_START_A       := 2026-11-25T00:00Z
-LOAD_END_A         := 2026-11-27T00:00Z
-LOAD_START_B       := 2026-11-27T00:00Z
-LOAD_END_B         := 2026-11-29T00:00Z
+LOAD_START_A       := 2026-11-26T00:00Z
+LOAD_END_A         := 2026-11-28T00:00Z
+LOAD_START_B       := 2026-11-28T00:00Z
+LOAD_END_B         := 2026-11-30T00:00Z
 
 LOAD_WINDOWS := dry-run A B
 # Expanded inside the recipe, so it also fires under `make -n`.
@@ -82,8 +82,8 @@ batch-window:
 # Works in a temporary worktree from origin/main, so your checkout is untouched.
 # The PR opens as a DRAFT: at the switch time, `gh pr ready <n>`, merge, and
 # approve `apply (main)` in the snowflake-dev environment.
-#   make profile-a SWITCH=S2 AT="2026-11-25 00:00 UTC"
-#   make profile-b SWITCH=S3 AT="2026-11-27 00:00 UTC" TIMEOUT_MS=12000
+#   make profile-a SWITCH=S2 AT="2026-11-26 00:00 UTC"
+#   make profile-b SWITCH=S3 AT="2026-11-28 00:00 UTC" TIMEOUT_MS=12000
 define prepare_profile_pr
 	@case "$(TIMEOUT_MS)" in ''|*[!0-9]*) [ -z "$(TIMEOUT_MS)" ] || { echo "TIMEOUT_MS must be a whole number" >&2; exit 2; };; esac
 	@set -e; \

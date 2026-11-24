@@ -56,7 +56,7 @@ regenerate it with `python tools/build_sdd_package.py`.
 ## Measurement windows (COST_GOVERNANCE)
 
 Source of truth: `docs/measurement/PROTOCOL.md`. Windows in UTC: dry run 2026-11-24 12:00–18:00 ·
-A 2026-11-25 00:00 → 11-27 00:00 · B → 11-29 00:00 · idle → 11-29 06:00. While a window is open,
+A 2026-11-26 00:00 → 11-28 00:00 · B → 11-30 00:00 · idle → 11-30 06:00. While a window is open,
 agents do not:
 
 - run anything on `CDC_WH` (that includes the measurement queries);

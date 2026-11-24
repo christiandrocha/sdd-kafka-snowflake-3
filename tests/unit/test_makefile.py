@@ -81,7 +81,7 @@ def test_load_sources_env_and_runs_for_real() -> None:
     res = make_n("load", "WINDOW=B")
     assert res.returncode == 0, res.stderr
     assert ". ./.env" in res.stdout
-    assert "--window B --start 2026-11-27T00:00Z --end 2026-11-29T00:00Z" in res.stdout
+    assert "--window B --start 2026-11-28T00:00Z --end 2026-11-30T00:00Z" in res.stdout
     assert "--plan-only" not in res.stdout
     assert "--no-task-check" not in res.stdout  # would void the window
 

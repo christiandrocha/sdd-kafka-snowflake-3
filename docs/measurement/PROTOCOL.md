@@ -35,10 +35,10 @@ All times in UTC. Vitória = UTC − 3.
 |--------|-------------|-----------|---------|---------|------------------------|------|
 | Dry run A | 2026-11-24 12:00 | 2026-11-24 15:00 | 09:00–12:00 | `baseline` | 0 | on |
 | Dry run B | 2026-11-24 15:00 | 2026-11-24 18:00 | 12:00–15:00 | `optimized` | 10 | on |
-| **A** | **2026-11-25 00:00** | **2026-11-27 00:00** | 24/11 21:00 – 26/11 21:00 | `baseline` | 0 | on |
-| **B** | **2026-11-27 00:00** | **2026-11-29 00:00** | 26/11 21:00 – 28/11 21:00 | `optimized` | 10 | on |
-| **Idle** | 2026-11-29 00:00 | 2026-11-29 06:00 | 28/11 21:00 – 29/11 03:00 | `optimized` | 10 | **off** |
-| Read results | ≥ 2026-11-29 10:00 | — | ≥ 07:00 | — | — | — |
+| **A** | **2026-11-26 00:00** | **2026-11-28 00:00** | 25/11 21:00 – 27/11 21:00 | `baseline` | 0 | on |
+| **B** | **2026-11-28 00:00** | **2026-11-30 00:00** | 27/11 21:00 – 29/11 21:00 | `optimized` | 10 | on |
+| **Idle** | 2026-11-30 00:00 | 2026-11-30 06:00 | 29/11 21:00 – 30/11 03:00 | `optimized` | 10 | **off** |
+| Read results | ≥ 2026-11-30 10:00 | — | ≥ 07:00 | — | — | — |
 
 The dry run measures what the DESIGN leaves open (§7). Its numbers are not part of the A/B.
 
@@ -55,15 +55,15 @@ One process per window, started before the window and running until `--end`:
 ```bash
 # check the plan first (touches no database)
 python3 tests/load/generate_load.py --window A \
-    --start 2026-11-25T00:00Z --end 2026-11-27T00:00Z --out docs/measurement/runs/A --plan-only
+    --start 2026-11-26T00:00Z --end 2026-11-28T00:00Z --out docs/measurement/runs/A --plan-only
 # then run it for real (same arguments without --plan-only)
 ```
 
 | Window | `--window` | `--start` | `--end` | `--out` |
 |--------|-----------|-----------|---------|---------|
 | Dry run | `dry-run` | `2026-11-24T12:00Z` | `2026-11-24T18:00Z` | `docs/measurement/runs/dry-run` |
-| A | `A` | `2026-11-25T00:00Z` | `2026-11-27T00:00Z` | `docs/measurement/runs/A` |
-| B | `B` | `2026-11-27T00:00Z` | `2026-11-29T00:00Z` | `docs/measurement/runs/B` |
+| A | `A` | `2026-11-26T00:00Z` | `2026-11-28T00:00Z` | `docs/measurement/runs/A` |
+| B | `B` | `2026-11-28T00:00Z` | `2026-11-30T00:00Z` | `docs/measurement/runs/B` |
 
 There is no generator during the idle window. The B process exits at 00:00 on its own.
 
@@ -94,9 +94,9 @@ Switches:
 
 | # | When (UTC) | To | PR also carries |
 |---|------------|----|-----------------|
-| S0 | ~~before 2026-11-24 12:00~~ → **the first apply** (before 2026-11-25 00:00) | `baseline`, N = 0 | Decision 8 limits (DESIGN 1.5); see §9 |
+| S0 | ~~before 2026-11-24 12:00~~ → **the first apply** (before 2026-11-26 00:00) | `baseline`, N = 0 | Decision 8 limits (DESIGN 1.5); see §9 |
 | S1 | ~~2026-11-24 15:00~~ — not done (no dry run, §9) | — | — |
-| S2 | **2026-11-25 00:00** | `baseline`, N = 0 — already in place since S0; no PR, no apply. Log `S2,no_change` in `switch.log` after checking that the last apply ran `verify_governance.sql` OK and that `.env` has `BATCH_WINDOW_MINUTES=0` | — (no dry-run recalibrations) |
+| S2 | **2026-11-26 00:00** | `baseline`, N = 0 — already in place since S0; no PR, no apply. Log `S2,no_change` in `switch.log` after checking that the last apply ran `verify_governance.sql` OK and that `.env` has `BATCH_WINDOW_MINUTES=0` | — (no dry-run recalibrations) |
 | S3 | **2026-11-27 00:00** | `optimized`, N = 10 | `gate_task_timeout_ms` from the dry run (O21), since only profile B applies it |
 
 Steps for each switch. Prepare the PR in advance. Never apply locally (Constitution R1).
@@ -110,10 +110,10 @@ Steps for each switch. Prepare the PR in advance. Never apply locally (Constitut
 
 ```text
 at_utc,switch,step,ref
-2026-11-25T00:00:40Z,S2,pr_merged,#NN
-2026-11-25T00:01:10Z,S2,dagster_recreated,BATCH_WINDOW_MINUTES=0
-2026-11-25T00:03:05Z,S2,apply_approved,run 1234567890
-2026-11-25T00:09:30Z,S2,verify_ok,run 1234567890
+2026-11-26T00:00:40Z,S2,pr_merged,#NN
+2026-11-26T00:01:10Z,S2,dagster_recreated,BATCH_WINDOW_MINUTES=0
+2026-11-26T00:03:05Z,S2,apply_approved,run 1234567890
+2026-11-26T00:09:30Z,S2,verify_ok,run 1234567890
 ```
 
 The minutes between the window start and `verify_ok` ran in the previous profile. They are
@@ -146,9 +146,9 @@ These are reported but **do not void** a window: skipped bursts (they appear in
 **Rerun policy (B5).**
 - Each void window (A or B) may be rerun **once**, as a whole 48 h window starting at the next
   00:00 UTC after the void is noticed, with the same load and the same profile.
-- **Last start for a rerun: 2026-11-29 00:00 UTC.** In that case the idle window moves to
-  directly after the rerun, and reading moves to ≥ 2026-12-01 10:00 UTC. That still leaves
-  Day 15 (2026-12-02). After that date nothing is rerun: the void window is reported as void, and
+- **Last start for a rerun: 2026-11-30 00:00 UTC.** In that case the idle window moves to
+  directly after the rerun, and reading moves to ≥ 2026-12-02 10:00 UTC, which is Day 15 itself:
+  a rerun moves *showable* to 2026-12-03 (§9, 2026-11-24 postponement). After that date nothing is rerun: the void window is reported as void, and
   the A/B is reported from whatever valid data exists, per cluster.
 - If the dry run is void, it is not rerun. Its §7 checks are re-read from the first hours of A.
 - **If the rerun needs more credits**, raise `cdc_wh_monitor_quota` in `terraform/env/dev.tfvars`
@@ -160,7 +160,7 @@ These are reported but **do not void** a window: skipped bursts (they appear in
 
 ## 6. Reading the results
 
-- **When:** ≥ 2026-11-29 10:00 UTC. `WAREHOUSE_EVENTS_HISTORY` and `METERING_DAILY_HISTORY`
+- **When:** ≥ 2026-11-30 10:00 UTC. `WAREHOUSE_EVENTS_HISTORY` and `METERING_DAILY_HISTORY`
   have up to 3 h of latency. The dry run is read on the evening of 2026-11-24, before 00:00 UTC.
 - **Where:** Snowsight, `docs/measurement/queries.sql` top to bottom. Role `CDC_GOVERNANCE_RO`;
   Q6 and Q0.2 switch to `CDC_ROLE_RO` themselves. Warehouse `CDC_WH`, **only outside the windows**
@@ -214,4 +214,5 @@ redeploy and rerun the protocol on another account.
 |------------|--------|--------|------------------|
 | 2026-11-23 | First version, before the dry run | — | — |
 | 2026-11-24 | **Dry run void, not rerun** (§5). S1 not done. S0 moves to the first apply, which already sets `cost_profile = "baseline"`, so S2 at 00:00 is a check only (§4). The §7 checks that need profile A only (D1, D2, D4, D6, D7, D9, D11, D12) are read from the first hours of A; D3, D5 and the S1 half of D10 need profile B and are read from the first hours of B. The load parameters stay at their defaults. S3 keeps `gate_task_timeout_ms` at its provisional 10 000 ms (O21): there are no serverless gate runs before B to calibrate it. | No apply had happened before 12:00 UTC (BUILD_REPORT O43). | Dry run |
+| 2026-11-24 | **Measurement postponed by 24 h**: A 2026-11-26 00:00 → 11-28 00:00, B → 11-30 00:00, idle → 11-30 06:00, reading ≥ 11-30 10:00 UTC. Every date in this file, `queries.sql`, `RESULTS_TEMPLATE.md`, the `Makefile` and `CLAUDE.md` moved with it. A rerun no longer fits before Day 15 (2026-12-02): it moves *showable* to 2026-12-03. The SCD2_RESTAURANTS embargo (its DESIGN Decision 9: until B ends) now ends 2026-11-30 00:00 UTC. | The Terraform state backend needs an AWS account (DESIGN Decision 12) that the owner does not have yet; it is created on 2026-11-25. Owner decision, taken ~6 h before the original A. | A, B, idle, reruns, SCD2 embargo |
 | 2026-11-24 | Decision 8 limits lowered to 25 / 30 / 5 (DESIGN 1.5) after the credit price was read: USD 4.65. A rerun that raises `cdc_wh_monitor_quota` above 25 also needs `account_monitor_quota` raised, keeping the worst case under ~50% (§5). | Price above the USD 3–4 the DESIGN assumed. | A, B, reruns |
