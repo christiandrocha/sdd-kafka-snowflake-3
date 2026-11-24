@@ -171,3 +171,14 @@ def test_budget_grants_viewer_to_the_plan_role():
         " TO ROLE TERRAFORM_PLAN_ROLE;"
         in _sql("budget.sql")
     )
+
+
+def test_bootstrap_service_users_have_no_secondary_roles():
+    """DESIGN 1.5, F14: with the default ('ALL'), the `sysadmin` provider alias
+    would act with every role granted to TERRAFORM_SVC, ACCOUNTADMIN included."""
+    sql = _sql("00_terraform_bootstrap.sql")
+    for user in ("TERRAFORM_SVC", "TERRAFORM_PLAN_SVC"):
+        create = re.search(rf"CREATE USER IF NOT EXISTS {user}\b(.*?);", sql, re.S)
+        assert create and re.search(r"DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)", create.group(1)), user
+        assert re.search(rf"ALTER USER {user}\s+SET DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)\s*;", sql), user
+    assert "'ALL'" not in sql

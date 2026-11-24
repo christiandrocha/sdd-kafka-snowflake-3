@@ -8,9 +8,9 @@ cost_profile = "baseline"
 snowflake_organization_name = "GWHUBCF"
 snowflake_account_name      = "QQ53235"
 
-# Must match the owner's user on this account (DESC USER); notifications need a
-# verified e-mail on that user.
-owner_user_name = "CHRISTIANDROCHA"
+# Must match the owner's user on this account (SHOW USERS, read 2026-11-24; v2's
+# user was CHRISTIANDROCHA); notifications need a verified e-mail on that user.
+owner_user_name = "CHRISTIANDR"
 
 # Decision 8 — sized for the whole trial (FREQUENCY = NEVER). Credit price read
 # 2026-11-24: USD 4.65 (RATE_SHEET_DAILY, Enterprise, sa-east-1); balance
