@@ -5,7 +5,7 @@
 -- WHY SQL: the provider has no resource for budgets or custom actions (F13).
 --
 -- WHAT IT DOES
---   * Budget CDC_POC.CONFIG.CDC_BUDGET, 10 credits / calendar month, scoped to
+--   * Budget CDC_POC.CONFIG.CDC_BUDGET, 5 credits / calendar month, scoped to
 --     the CDC_POC database: serverless gate tasks and Snowpipe Streaming, which
 --     resource monitors cannot see (F2).
 --   * Refresh tier TIER_1H (owner decision 2026-11-18): ~1 h detection delay
@@ -49,7 +49,7 @@ USE SCHEMA CDC_POC.CONFIG;
 CREATE SNOWFLAKE.CORE.BUDGET IF NOT EXISTS CDC_POC.CONFIG.CDC_BUDGET()
     COMMENT = 'Serverless spend in CDC_POC (gate tasks, Snowpipe Streaming). Managed by scripts/budget.sql.';
 
-CALL CDC_POC.CONFIG.CDC_BUDGET!SET_SPENDING_LIMIT(10);
+CALL CDC_POC.CONFIG.CDC_BUDGET!SET_SPENDING_LIMIT(5);
 CALL CDC_POC.CONFIG.CDC_BUDGET!SET_REFRESH_TIER('TIER_1H');
 CALL CDC_POC.CONFIG.CDC_BUDGET!SET_EMAIL_NOTIFICATIONS('<% notify_email %>');
 CALL CDC_POC.CONFIG.CDC_BUDGET!SET_NOTIFICATION_THRESHOLD(100);
@@ -92,7 +92,7 @@ CALL CDC_POC.CONFIG.CDC_BUDGET!REMOVE_CYCLE_START_ACTION();
 GRANT SNOWFLAKE.CORE.BUDGET ROLE CDC_POC.CONFIG.CDC_BUDGET!VIEWER TO ROLE TERRAFORM_PLAN_ROLE;
 
 -- 6. Read-back (AT-003; verify_governance.sql repeats the checks) ------------
-CALL CDC_POC.CONFIG.CDC_BUDGET!GET_SPENDING_LIMIT();            -- 10
+CALL CDC_POC.CONFIG.CDC_BUDGET!GET_SPENDING_LIMIT();            -- 5
 CALL CDC_POC.CONFIG.CDC_BUDGET!GET_REFRESH_TIER();              -- TIER_1H
 CALL CDC_POC.CONFIG.CDC_BUDGET!GET_BUDGET_SCOPE();              -- resources: CDC_POC
 CALL CDC_POC.CONFIG.CDC_BUDGET!GET_CUSTOM_ACTIONS();            -- one ACTUAL 100 action

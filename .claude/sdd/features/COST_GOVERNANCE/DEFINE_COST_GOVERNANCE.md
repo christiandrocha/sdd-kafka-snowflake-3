@@ -10,7 +10,7 @@
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Approved (1.4) — in Build (DESIGN 1.4) |
+| **Status** | Approved (1.4) — in Build (DESIGN 1.5) |
 | **Clarity Score** | 13/15 |
 | **Approved by** | Christian, 2026-11-17 |
 
@@ -166,7 +166,7 @@ its method. The README states the number we got, not the number we hoped for.
 |----|------------|------------------|------------|
 | A-001 | Gen1 standard warehouses can still be created in `sa-east-1` | REQ-02 falls back to documenting the Gen2 cost and sizing around it | [x] 2026-11-17 — probe warehouse created with `GENERATION = '1'` reported `generation = 1`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` was rejected |
 | A-002 | The Terraform provider supports the warehouse `GENERATION` property, serverless task and monitor settings | Unsupported settings go through a small, versioned SQL step called by CI, documented as an exception. **Higher risk since 2026-11-17:** `GENERATION` is the newer syntax and provider support must be checked first | [ ] Day 3 |
-| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-28. Balance confirmed: USD 400. Credit price to read before the first apply |
+| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-29 (postponed +24 h on 2026-11-24, PROTOCOL §9). Balance confirmed: USD 400 (USD 395.14 on 2026-11-24). Credit price read 2026-11-24: USD 4.65 (~85 credits); limits lowered in DESIGN 1.5 |
 | A-003 | Serverless tasks bill per second, with no 60-second minimum, at a multiplier near 1 | H1 may fail; the measurement still ships | [ ] Day 2 (rate card) |
 | A-004 | The synthetic load is representative of a bursty CDC workload | Results do not generalize to continuous streaming; the README says so | [ ] By design |
 | A-005 | A and B can run on the same account without interfering | Run them sequentially with v2 paused if interference shows up in the dry run | [ ] Day 7 |

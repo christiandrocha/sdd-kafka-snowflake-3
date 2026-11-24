@@ -87,7 +87,7 @@ regenerate it with `python tools/build_sdd_package.py`.
 #### Measurement windows (COST_GOVERNANCE)
 
 Source of truth: `docs/measurement/PROTOCOL.md`. Windows in UTC: dry run 2026-11-24 12:00–18:00 ·
-A 2026-11-25 00:00 → 11-27 00:00 · B → 11-29 00:00 · idle → 11-29 06:00. While a window is open,
+A 2026-11-26 00:00 → 11-28 00:00 · B → 11-30 00:00 · idle → 11-30 06:00. While a window is open,
 agents do not:
 
 - run anything on `CDC_WH` (that includes the measurement queries);
@@ -228,7 +228,7 @@ runbooks, README with *What it actually costs*.
 
 | Feature | Phase | DEFINE | Owner |
 |---------|-------|--------|-------|
-| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 21 drafted by the build agent and merged (#16, 2026-11-23); 19, 22 with the owner; no apply yet (bootstrap, credit price, CI secrets and remaining variables pending; `main` ruleset and non-secret variables set 2026-11-23); DESIGN 1.4 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
+| COST_GOVERNANCE | Build — items 1–14 and 16–18 merged (#1–#6, 2026-11-23); 15 drafted by the build agent for owner review (#10, 2026-11-23; B5 closed); 20 merged (#14, 2026-11-23); 21 drafted by the build agent and merged (#16, 2026-11-23); 19, 22 with the owner; credit price read and limits 25 / 30 / 5 + first apply in `baseline` drafted (run 10, 2026-11-24); dry run void and **measurement postponed 24 h** to A 2026-11-26 00:00 UTC (no AWS account for the state backend yet; PROTOCOL §9); no apply yet (bootstrap, CI secrets and remaining variables pending; `main` ruleset and non-secret variables set 2026-11-23); DESIGN 1.5 | [DEFINE](#part-5--define-cost_governance) · [DESIGN](#part-6--design-cost_governance) | Christian |
 | SCD2_RESTAURANTS | Design — draft (1.0.1, 2026-11-23; Decisions 8–9 approved by owner); independent review next. Build offline until Measurement B ends (Decision 9) | [DEFINE](#part-8--define-scd2_restaurants) · [DESIGN](#part-9--design-scd2_restaurants) | Christian |
 
 #### Fast tracks (mini-DEFINEs)
@@ -270,7 +270,7 @@ one PR at a time.
 
 #### 15-day plan
 
-Day 1 = **2026-11-18** → Day 8–11 (measurement) = **Nov 25–28** · Day 15 (showable) = **Dec 2** · trial ends **Dec 17**. Days 8–11 are inelastic: the A/B measurement needs calendar days of
+Day 1 = **2026-11-18** → Day 9–12 (measurement) = **Nov 26–29** (UTC windows A 11-26 00:00 → B ends 11-30 00:00; postponed +24 h on 2026-11-24, PROTOCOL §9 — the Day rows below still show the original days; read the measurement rows one day later) · Day 15 (showable) = **Dec 2** (Dec 3 if a window is rerun) · trial ends **Dec 17**. The measurement days are inelastic: the A/B measurement needs calendar days of
 controlled load. Any slip in week 1 comes out of week 2's polish, never out of the measurement.
 
 | Day | COST_GOVERNANCE | SCD2_RESTAURANTS | Fast tracks |
@@ -279,10 +279,10 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 2 | ~~DESIGN + second-opinion review~~ — done on Day 1 (DESIGN 1.0 signed off 2026-11-18). Build items 1–4 started on Day 1; DESIGN 1.1 from the Build (F14). | — | FT-04 |
 | 3–4 | Build: Terraform core (warehouse Gen1, roles, monitors incl. account level, state backend), CI `plan` + approved `apply` | ~~DESIGN + review~~ — slipped to Day 6 | — |
 | 5–6 | Build: serverless gate tasks, run-batching window, load generator | Day 6: DESIGN 1.0 (2026-11-23) + independent review | FT-03 |
-| 7 | Dry run of the measurement protocol (½ day of each config) | Build **offline** (DESIGN Decision 9): `scd2` strategy, models, tests, fixture, ADR draft; `dbt parse` + `pytest` + simulation only. PRs stay open | — |
+| 7 | ~~Dry run of the measurement protocol (½ day of each config)~~ — void: no apply before 12:00 UTC; its checks move to the first hours of A and B (PROTOCOL §9) | Build **offline** (DESIGN Decision 9): `scd2` strategy, models, tests, fixture, ADR draft; `dbt parse` + `pytest` + simulation only. PRs stay open | — |
 | 8–9 | **Measurement A — v2 configuration** under the fixed load | Build offline continues. **Nothing SCD2 on the account or Postgres** | FT-01 |
 | 10–11 | **Measurement B — v3 configuration** under the same load | Build offline continues. **Nothing SCD2 on the account or Postgres** | — |
-| 12 | Validate (independent session): queries, chart | From 2026-11-29 00:00 UTC: merge, apply fixture, `dbt build --vars '{scd2_strict: true}'` twice; record A-001/A-002/F4/F7 in BUILD_REPORT | FT-02 |
+| 12 | Validate (independent session): queries, chart | From 2026-11-30 00:00 UTC: merge, apply fixture, `dbt build --vars '{scd2_strict: true}'` twice; record A-001/A-002/F4/F7 in BUILD_REPORT | FT-02 |
 | 13 | Ship: ADRs, runbooks (connector down; monitor suspended the warehouse) | Validate (independent session) | FT-05 |
 | 14 | README *What it actually costs* rewritten with measured numbers. Retro. | Ship + Retro (README SCD2 section after COST_GOVERNANCE's README edit; shared file) | — |
 | 15 | Buffer / polish. LinkedIn post #2 with the measured chart. | — | — |
@@ -294,7 +294,7 @@ controlled load. Any slip in week 1 comes out of week 2's polish, never out of t
 | 1 | ~~Canonical resource-monitor values~~ — resolved 2026-11-17: new trial account `GWHUBCF-QQ53235`, no monitors; Terraform defines them from scratch. | Resolved | — |
 | 2 | ~~Credit budget for the A/B measurement~~ — resolved: 25 credits on the `CDC_WH` monitor (owner decision) | Resolved | — |
 | 6 | ~~Trial end date and balance~~ — resolved: 2026-12-17, USD 400 | Resolved | — |
-| 7 | Credit price for this edition/region (*Admin → Billing*) | Blocks the first apply (planned Day 3, slipped; now needed before the Day 7 dry run) | Lower the limits if 60 credits > 50% of the balance |
+| 7 | ~~Credit price for this edition/region~~ — resolved 2026-11-24: USD 4.65 (`RATE_SHEET_DAILY`; *Admin → Billing* is empty on the trial); balance USD 395.14; limits lowered to 25 / 30 / 5 (DESIGN 1.5) | Resolved | — |
 | 3 | ~~Repository name~~ — resolved: repository `sdd-kafka-snowflake-3` created 2026-11-17 | Resolved | — |
 | 4 | ~~Day 1 date~~ — resolved: 2026-11-18 | Resolved | — |
 | 5 | ~~Terraform state backend~~ — resolved: S3 with native lockfile, no DynamoDB (DESIGN Decision 12) | Resolved | — |
@@ -328,7 +328,7 @@ Azure variant · project templating (copier/cookiecutter) · `engagement/` kit f
 | **Feature** | COST_GOVERNANCE |
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
-| **Status** | Approved (1.4) — in Build (DESIGN 1.4) |
+| **Status** | Approved (1.4) — in Build (DESIGN 1.5) |
 | **Clarity Score** | 13/15 |
 | **Approved by** | Christian, 2026-11-17 |
 
@@ -484,7 +484,7 @@ its method. The README states the number we got, not the number we hoped for.
 |----|------------|------------------|------------|
 | A-001 | Gen1 standard warehouses can still be created in `sa-east-1` | REQ-02 falls back to documenting the Gen2 cost and sizing around it | [x] 2026-11-17 — probe warehouse created with `GENERATION = '1'` reported `generation = 1`; `RESOURCE_CONSTRAINT = STANDARD_GEN_1` was rejected |
 | A-002 | The Terraform provider supports the warehouse `GENERATION` property, serverless task and monitor settings | Unsupported settings go through a small, versioned SQL step called by CI, documented as an exception. **Higher risk since 2026-11-17:** `GENERATION` is the newer syntax and provider support must be checked first | [ ] Day 3 |
-| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-28. Balance confirmed: USD 400. Credit price to read before the first apply |
+| A-006 | Trial time and credits cover Build + 4 days of measurement | Shrink the load profile, or add a payment method before Day 8 | [~] Time validated: trial ends 2026-12-17, measurement ends 2026-11-29 (postponed +24 h on 2026-11-24, PROTOCOL §9). Balance confirmed: USD 400 (USD 395.14 on 2026-11-24). Credit price read 2026-11-24: USD 4.65 (~85 credits); limits lowered in DESIGN 1.5 |
 | A-003 | Serverless tasks bill per second, with no 60-second minimum, at a multiplier near 1 | H1 may fail; the measurement still ships | [ ] Day 2 (rate card) |
 | A-004 | The synthetic load is representative of a bursty CDC workload | Results do not generalize to continuous streaming; the README says so | [ ] By design |
 | A-005 | A and B can run on the same account without interfering | Run them sequentially with v2 paused if interference shows up in the dry run | [ ] Day 7 |
@@ -550,7 +550,7 @@ its method. The README states the number we got, not the number we hoped for.
 | **Date** | 2026-11-17 |
 | **Author** | Christian (with Claude) |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
-| **Status** | 1.4 — In Build (ready for Build since the owner review of the 1.3 → 1.4 diff, 2026-11-18; 1.1–1.3 owner decisions; 1.0 signed off by independent review 2026-11-18) |
+| **Status** | 1.5 — In Build (1.5: owner decision on the spending limits after reading the credit price, 2026-11-24; ready for Build since the owner review of the 1.3 → 1.4 diff, 2026-11-18; 1.1–1.3 owner decisions; 1.0 signed off by independent review 2026-11-18) |
 
 ---
 
@@ -571,7 +571,8 @@ its method. The README states the number we got, not the number we hoped for.
 | F11 | The latest provider is **2.23.0**. `snowflake_table`, `snowflake_procedure_sql` and `snowflake_current_account` are **preview features**: they must be listed in the provider's `preview_features_enabled`, and "may have breaking changes in future releases, even without raising the major version". | provider schema 2.23.0, `preview_features_enabled` description (read 2026-11-18) | `terraform/platform` enables exactly `snowflake_table_resource` and `snowflake_procedure_sql_resource`; the exact provider version is pinned in `.terraform.lock.hcl` (Decision 4) and upgraded only by PR. Risk added. |
 | F12 | `snowflake_current_account` can set the account-level monitor (`resource_monitor`), but it is a preview resource and "external changes for this field won't be detected". | provider schema 2.23.0 (read 2026-11-18) | **Not used** (owner decision 2026-11-18): exception 3 stays as CI SQL (Decision 9). Recorded as a future alternative once the resource leaves preview. |
 | F13 | The provider has **no resource for budgets or budget custom actions** (154 resources in 2.23.0, none for budgets). | provider schema 2.23.0 (read 2026-11-18) | Exception 2 (`budget.sql`) confirmed. |
-| F14 | "Only users with the ACCOUNTADMIN role can create a resource monitor", "… can **assign warehouses** to resource monitors" and "… can set a resource monitor to monitor the account". A role with **MONITOR or MODIFY** on a monitor can see it in `SHOW RESOURCE MONITORS`. The provider's `snowflake_warehouse.resource_monitor` is a plain optional field (not computed), so an assignment made outside the warehouse resource shows as a diff on every plan. **Probe P1 (Appendix) — pending, run by the owner;** expected read-back in the F6 format: as `SYSADMIN`, `ALTER WAREHOUSE … SET RESOURCE_MONITOR` and `CREATE WAREHOUSE … RESOURCE_MONITOR =` fail with insufficient privileges; as `ACCOUNTADMIN` the `ALTER` succeeds and `SHOW WAREHOUSES` returns the monitor in `resource_monitor`. | Snowflake docs, [*Working with resource monitors* — Assigning warehouses to a resource monitor](https://docs.snowflake.com/en/user-guide/resource-monitors#assigning-warehouses-to-a-resource-monitor) and [Setting a resource monitor for your account](https://docs.snowflake.com/en/user-guide/resource-monitors#setting-a-resource-monitor-for-your-account); [`ALTER WAREHOUSE`, access control](https://docs.snowflake.com/en/sql-reference/sql/alter-warehouse) (read 2026-11-18); provider schema 2.23.0 | Pattern 2 as written in 1.0 (`provider = snowflake.sysadmin` with `resource_monitor`) cannot apply. `CDC_WH` is created by the `accountadmin` alias — a named exception in Decision 9. The read-only plan role gets MONITOR on both monitors (Decision 9). |
+| F14 | "Only users with the ACCOUNTADMIN role can create a resource monitor", "… can **assign warehouses** to resource monitors" and "… can set a resource monitor to monitor the account". A role with **MONITOR or MODIFY** on a monitor can see it in `SHOW RESOURCE MONITORS`. The provider's `snowflake_warehouse.resource_monitor` is a plain optional field (not computed), so an assignment made outside the warehouse resource shows as a diff on every plan. **Probe P1 (Appendix), run by the owner in Snowsight 2026-11-24:** P1.3 `ALTER WAREHOUSE PROBE_WH_P1 SET RESOURCE_MONITOR` as `ACCOUNTADMIN` → success; P1.4 `SHOW WAREHOUSES` → `resource_monitor = PROBE_RM_P1` on both warehouses, `STANDARD_GEN_1`. **P1.1 and P1.2 as `SYSADMIN` → success, owner `SYSADMIN` — inconclusive**: the owner's user has `DEFAULT_SECONDARY_ROLES = ["ALL"]`, so ACCOUNTADMIN counted for the privilege check while SYSADMIN, the primary role, took ownership. A rerun after `USE SECONDARY ROLES NONE` still read back `CURRENT_SECONDARY_ROLES() = {"roles":"ACCOUNTADMIN,ORGADMIN","value":"ALL"}` in the worksheet, so it proves nothing either way. Consequence: `00_terraform_bootstrap.sql` sets `DEFAULT_SECONDARY_ROLES = ()` on both service users (1.5), so each provider alias holds only its own role; the first apply with that setting is the real test of the SYSADMIN half. | Snowflake docs, [*Working with resource monitors* — Assigning warehouses to a resource monitor](https://docs.snowflake.com/en/user-guide/resource-monitors#assigning-warehouses-to-a-resource-monitor) and [Setting a resource monitor for your account](https://docs.snowflake.com/en/user-guide/resource-monitors#setting-a-resource-monitor-for-your-account); [`ALTER WAREHOUSE`, access control](https://docs.snowflake.com/en/sql-reference/sql/alter-warehouse) (read 2026-11-18); provider schema 2.23.0 | Pattern 2 as written in 1.0 (`provider = snowflake.sysadmin` with `resource_monitor`) cannot apply. `CDC_WH` is created by the `accountadmin` alias — a named exception in Decision 9. The read-only plan role gets MONITOR on both monitors (Decision 9). |
+| F15 | Credit price on this account: **USD 4.65** per credit (`WAREHOUSE_METERING`, `compute`), the same on 2026-11-17 and 2026-11-23 — the Enterprise on-demand rate for AWS São Paulo in third-party price tables. Remaining trial balance **USD 395.14** on 2026-11-24 (`free_usage_balance`; the view lags up to 24 h). *Admin → Billing* shows nothing on this trial. | `SNOWFLAKE.ORGANIZATION_USAGE.RATE_SHEET_DAILY`, `REMAINING_BALANCE_DAILY`, read by the owner in Snowsight 2026-11-24 | Balance ≈ **85 credits**, so the 1.2 worst case (~63 credits ≈ USD 293, 74%) breaks the ~50% rule of Decision 8. Limits lowered in 1.5 (Decision 8). |
 
 ---
 
@@ -906,40 +907,44 @@ guardrail applies to profile B only, so A's freshness is reported as indicative.
 
 | Attribute | Value |
 |-----------|-------|
-| **Status** | Accepted — owner decision on the pipeline cap (2026-11-17) |
+| **Status** | Accepted — owner decision on the pipeline cap (2026-11-17); limits lowered by owner decision after F15 (2026-11-24, DESIGN 1.5) |
 | **Date** | 2026-11-17 |
 
-**Context:** balance USD 400 (confirmed), trial ends 2026-12-17 and spans two calendar months; budgets
-are monthly (calendar), monitors can be `NEVER` (F9). Credit price for this edition/region still to be
-read from *Admin → Billing*; at USD 3–4/credit the balance is ~100–130 credits.
+**Context:** balance USD 400 at creation, USD 395.14 on 2026-11-24; trial ends 2026-12-17 and spans
+two calendar months; budgets are monthly (calendar), monitors can be `NEVER` (F9). Credit price read
+2026-11-24: **USD 4.65** (F15), so the balance is **~85 credits** (1.0–1.4 assumed USD 3–4, ~100–130).
 
 **Choice (in `dev.tfvars`):**
 
 | Control | Scope | Quota | Frequency | Triggers |
 |---------|-------|-------|-----------|----------|
 | `cdc_wh_monitor` | `CDC_WH` | **25 credits** (owner decision) | `NEVER` | notify 50/75 · suspend 90 · suspend immediately 100 |
-| `account_monitor` | account (all warehouses, incl. `COMPUTE_WH`) | 40 credits | `NEVER` | notify 50/75/90 · suspend 100 |
-| `cdc_budget` (custom) | `CDC_POC` (serverless tasks, Snowpipe Streaming) | 10 credits / calendar month | monthly | notify + custom action at 100% |
+| `account_monitor` | account (all warehouses, incl. `COMPUTE_WH`) | **30 credits** (40 until 1.4) | `NEVER` | notify 50/75/90 · suspend 100 |
+| `cdc_budget` (custom) | `CDC_POC` (serverless tasks, Snowpipe Streaming) | **5 credits** / calendar month (10 until 1.4) | monthly | notify + custom action at 100% |
 
 **Rationale:** the measurement is estimated at ~16 credits (Measurement plan); 25 on `CDC_WH` leaves
-room for the dry run and one rerun. With `NEVER`, the warehouse caps hold for the whole trial instead
+room for the dry run and one rerun, so it is **not** lowered in 1.5: a lower cap risks suspending
+`CDC_WH` inside a window, which voids it. The account monitor keeps 5 credits above it for
+`COMPUTE_WH` and `CDC_CI_WH`. With `NEVER`, the warehouse caps hold for the whole trial instead
 of resetting mid-way.
 
 **What the budget will see in November (estimate):** Snowpipe Streaming — v2 measured 0.0005 credits
 for its whole ingestion; the measurement load is ~10× v2's rows → well under 0.1 credit. Serverless
 gate tasks in profile B — ~5 bursts × 10 domains × 12 clusters/day × ~2 s ≈ 1,200 s/day ≈ 0.3 credit/day
 × 0.9 → ~0.3 credit/day, ~1 credit for window B plus the idle window. Total ≈ 1–2 credits against a
-10-credit monthly limit: the action should not fire during a healthy window B.
+5-credit monthly limit: the action should not fire during a healthy window B. A lower limit (4) was
+rejected: the serverless estimate is not measured yet.
 
-**Worst case, stated with the detection delay:** warehouses 40 (account monitor, `NEVER`) + budget
-2 × 10 (two calendar months) + up to ~1.5 credits of overshoot per month before the budget action fires
-on `TIER_1H` (Decision 5, F8) ≈ **63 credits** in the pathological case (≈ 80 on the default tier).
-At USD 3–4/credit that is ~50–65% of the trial in the worst case — **acceptable only because
-it requires every gate task to time out every minute for hours**; the task-state check above makes
-that visible within one cluster.
+**Worst case, stated with the detection delay:** warehouses 30 (account monitor, `NEVER`) + budget
+2 × 5 (two calendar months) + up to ~1.5 credits of overshoot per month before the budget action fires
+on `TIER_1H` (Decision 5, F8) ≈ **43 credits** in the pathological case ≈ **USD 200**, ~50% of the
+balance at USD 4.65 (F15). Up to 1.4 it was 40 + 2 × 10 + ~3 ≈ 63 credits (≈ USD 293, 74% at the read
+price). Acceptable **only because it requires every gate task to time out every minute for hours**;
+the task-state check above makes that visible within one cluster.
 
-**Consequences:** **the credit price must be read before the first apply**; if 60 credits exceed
-~50% of the balance, the defaults are lowered in the same PR. Monitor `NOTIFY_USERS` = the owner.
+**Consequences:** the credit price was read before the first apply (F15) and the limits were lowered
+in the same PR as the first apply (1.5). If the balance drops or a rerun needs more credits, the
+worst case is recomputed against the ~50% rule before raising any limit (PROTOCOL §5). Monitor `NOTIFY_USERS` = the owner.
 
 ---
 
@@ -1130,13 +1135,13 @@ The generator writes `docs/measurement/runs/<window>/commits.csv` (`burst_id, co
 | Window | Start (UTC) | End (UTC) | Profile | Load |
 |--------|-------------|-----------|---------|------|
 | Dry run | 2026-11-24 12:00 | 2026-11-24 18:00 | A 3 h, then B 3 h | on |
-| A | **2026-11-25 00:00** | **2026-11-27 00:00** | baseline | on |
-| B | 2026-11-27 00:00 | 2026-11-29 00:00 | optimized | on |
-| Idle | 2026-11-29 00:00 | 2026-11-29 06:00 | optimized | **off** (idle criterion, F3) |
-| Read results | ≥ 2026-11-29 10:00 | — | — | `ACCOUNT_USAGE` latency |
+| A | **2026-11-26 00:00** | **2026-11-28 00:00** | baseline | on |
+| B | 2026-11-28 00:00 | 2026-11-30 00:00 | optimized | on |
+| Idle | 2026-11-30 00:00 | 2026-11-30 06:00 | optimized | **off** (idle criterion, F3) |
+| Read results | ≥ 2026-11-30 10:00 | — | — | `ACCOUNT_USAGE` latency |
 
-In Vitória time, the measurement ends on 2026-11-28 at 21:00 and the idle window on 2026-11-29 at
-03:00 — consistent with the `_index` plan (Days 8–11 = Nov 25–28 local).
+In Vitória time, the measurement ends on 2026-11-29 at 21:00 and the idle window on 2026-11-30 at
+03:00 — consistent with the `_index` plan (Days 9–12 = Nov 26–29 local; postponed +24 h in 1.5, PROTOCOL §9).
 
 **Predictions, written before measuring:**
 
@@ -1441,9 +1446,9 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 
 | Variable | Where | Value | Notes |
 |----------|-------|-------|-------|
-| `cost_profile` | `terraform/env/dev.tfvars` only | `optimized` (`baseline` during window A) | No default in code |
+| `cost_profile` | `terraform/env/dev.tfvars` only | `optimized` (`baseline` during window A; the first apply is already `baseline`, PROTOCOL §9) | No default in code |
 | `database_name`, `warehouse_name`, `role_name`, `readonly_role_name` | Terraform | `CDC_POC`, `CDC_WH`, `CDC_ROLE`, `CDC_ROLE_RO` | Decision 3 |
-| `cdc_wh_monitor_quota`, `account_monitor_quota`, `budget_monthly_limit` | `dev.tfvars` / `budget.sql` | 25 / 40 / 10 credits | Decision 8; confirm credit price first |
+| `cdc_wh_monitor_quota`, `account_monitor_quota`, `budget_monthly_limit` | `dev.tfvars` / `budget.sql` | 25 / 30 / 5 credits | Decision 8; credit price USD 4.65 (F15) |
 | `BATCH_WINDOW_MINUTES` | Dagster `.env` | `10` (`0` during window A) | Decision 6 |
 | `QUIET_CYCLES` | `gate.py` constant | 3 | Revisited after the dry run |
 | `LOAD_SEED`, `LOAD_CLUSTER_MINUTES`, `LOAD_BURST_OFFSETS`, `LOAD_ROWS_PER_BURST` | generator | `42`, `120`, `0,2,4,10,12`, `200` | Calibrated in the dry run |
@@ -1501,6 +1506,7 @@ def after_query(state: GateState, now: datetime, found_rows: bool, window: timed
 | 1.2 | 2026-11-18 | Christian (with Claude, Build session) | Items 5–6 Build, owner decisions: budget refresh `TIER_1H`; no cycle-start action; `budget.sql` runs as a dedicated `CDC_BUDGET_ADMIN` role instead of ACCOUNTADMIN, so the `SNOWFLAKE.BUDGET_CREATOR` grant joins the Decision 9 named list. F8 now from official docs (6.5 h default / 1 h; actual actions once a month, one retry); Decision 5/8 worst case recomputed (~1.5 credits overshoot, ~63 total). SNOWFLAKE database-role grant confirmed. New `CDC_CI_WH` for the CI SQL steps (validity rules; owner decision). Not reviewed by an independent session. |
 | 1.3 | 2026-11-18 | Christian (with Claude, Build session) | Items 16–18 Build, owner decisions: Decision 11 consequence recorded (approval before the job, so the apply re-plans and compares with the PR plan, warning only; pipeline-skip notice in the job summary; read-only key in `snowflake-dev` for `verify_governance.sql`; `BUDGET_NOTIFY_EMAIL` as a secret). AWS state bootstrap as a documented manual step with least-privilege OIDC roles and mandatory bucket versioning (Decision 12). Manifest item 16 lists its helpers and runbook. Item 15 stays with the owner; the build agent drafted `queries.sql` only. Not reviewed by an independent session. |
 | 1.4 | 2026-11-18 | Christian (with Claude, Build session) | Items 10–13 Build: Pattern 4 / Decision 6 corrected, because an empty starvation-guard query under continuous traffic made the sensor query every minute; it now restarts `pending_since` (simulation kept as a regression test). Decision 7: `assets.py` writes the run key; the sensor runs `UPDATE` first, then reads the rows it marked; a failed run's rows are released back to pending (reprocess, no automatic retry). `assets.py` owned by COST_GOVERNANCE (no other feature touches it); manifest item 12 points to it. Agent Assignment deviation: Claude Code builds 10–13. No scope change. |
+| 1.5 | 2026-11-24 | Christian (with Claude, Build session) | Owner decision after reading the credit price (F15: USD 4.65, balance USD 395.14 ≈ 85 credits): Decision 8 limits 25 / **30** / **5** (account monitor 40 → 30, budget 10 → 5, `CDC_WH` cap unchanged); worst case ~63 → ~43 credits (≈ USD 200, ~50%). `budget.sql`, `verify_governance.sql` and `dev.tfvars` follow. The first apply already sets `cost_profile = "baseline"` (PROTOCOL §9). Probe P1 recorded in F14 (P1.3/P1.4 confirm the ACCOUNTADMIN path; P1.1/P1.2 inconclusive because of secondary roles); the Terraform service users get `DEFAULT_SECONDARY_ROLES = ()`. `owner_user_name` is `CHRISTIANDR` on this account. Measurement postponed by 24 h (A 2026-11-26 00:00 UTC): Decision 12 assumed an AWS account the owner did not have (PROTOCOL §9). No scope change. Not reviewed by an independent session. |
 
 ---
 
@@ -1523,7 +1529,7 @@ recorded in the BUILD_REPORT.
 
 **Ready for:** the next `/sdd-build COST_GOVERNANCE` items (1–6 built, see the BUILD_REPORT). Build checklist items
 B1–B5 are closed during the Build on the Days listed. Probe P1 (Appendix) is run by the owner before
-the first apply (Day 3); its read-back replaces "pending" in F14.
+the first apply (Day 3); its read-back is recorded in F14 (2026-11-24, DESIGN 1.5).
 
 ---
 
@@ -1573,7 +1579,7 @@ SHOW WAREHOUSES LIKE 'PROBE_WH_P1%';
 | **Author** | build-agent (Claude Code), owner Christian |
 | **DEFINE** | [DEFINE_COST_GOVERNANCE.md](#part-5--define-cost_governance) — v1.4 |
 | **DESIGN** | [DESIGN_COST_GOVERNANCE.md](#part-6--design-cost_governance) — v1.4 |
-| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-25 00:00 UTC); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9) and merged (#16, 2026-11-23); 19, 22 pending (owner-authored / shared); no apply yet |
+| **Status** | In Progress — items 1–14 and 16–18 built and merged to `main` (#1–#6, last 2026-11-23); 15 drafted (run 7) and merged (#10, 2026-11-23), owner edits allowed until window A starts (2026-11-26 00:00 UTC since run 10); 20 built (run 8) and merged (#14, 2026-11-23); 21 drafted (run 9) and merged (#16, 2026-11-23); 19, 22 pending (owner-authored / shared); run 10 (2026-11-24): credit price read (O1 closed), limits 25 / 30 / 5 and `cost_profile = "baseline"` for the first apply (DESIGN 1.5); no apply yet |
 
 ---
 
@@ -2422,11 +2428,82 @@ workflow runs only on Terraform paths. A docs-only PR would wait for them foreve
 
 ---
 
+#### Run 10 — 2026-11-24 — credit price, Decision 8 limits, first apply in `baseline`
+
+Branch `feat/cost-governance-credit-limits`, from `main` (`3b6c524`). Requirements: **REQ-07**
+(measurement protocol: profile of the first apply, void dry run), **REQ-08** (spending limits applied
+through CI). DESIGN **1.4 → 1.5** (owner decision, not reviewed by an independent session).
+**Shared file touched: `.env.example`.**
+
+##### Owner decisions (2026-11-24)
+
+1. **Credit price read** by the owner in Snowsight (*Admin → Billing* is empty on this trial):
+   `ORGANIZATION_USAGE.RATE_SHEET_DAILY` → **USD 4.65** (`WAREHOUSE_METERING`, `compute`, 2026-11-17
+   and 2026-11-23); `REMAINING_BALANCE_DAILY` → **USD 395.14** on 2026-11-24 (≈ 85 credits). DESIGN F15.
+2. **Limits 25 / 30 / 5** (`CDC_WH` monitor unchanged, account monitor 40 → 30, budget 10 → 5 per
+   month). Worst case ~63 → **~43 credits ≈ USD 200**, ~50% of the balance. Rejected: 20 / 25 / 5
+   (too little room for a rerun) and keeping 25 / 40 / 10 (74% of the balance).
+3. **The first apply sets `cost_profile = "baseline"`.** No apply happened before 12:00 UTC, so the
+   dry run is void and not rerun (PROTOCOL §5); S0 becomes the first apply and S2 at 00:00 is a check
+   only (PROTOCOL §4, §9).
+4. **Probe P1** run by the owner (DESIGN F14): the ACCOUNTADMIN path is confirmed; the SYSADMIN half is
+   inconclusive because the owner's session had ACCOUNTADMIN as a secondary role, and the Snowsight
+   worksheet kept it after `USE SECONDARY ROLES NONE`. **The Terraform service users get
+   `DEFAULT_SECONDARY_ROLES = ()`**: with the default `ALL`, the `sysadmin` alias would act with
+   ACCOUNTADMIN's privileges and Decision 9 would hold only in the code. Accepted risk: a resource
+   that silently needed more than its alias's role fails the first apply loudly.
+5. **`owner_user_name = "CHRISTIANDR"`**: `SHOW USERS` on this account (v2's name was
+   `CHRISTIANDROCHA`, which would have failed the monitors' `notify_users` and the governance grant).
+6. **Measurement postponed by 24 h**: A 2026-11-26 00:00 → 11-28 00:00 UTC, B → 11-30 00:00, idle →
+   11-30 06:00. The owner has no AWS account for the state backend (O51) and creates it on 2026-11-25;
+   with ~6 h left before the original A, the remaining steps did not fit. Dates moved in PROTOCOL,
+   `queries.sql`, `RESULTS_TEMPLATE.md`, `Makefile`, `generate_load.py` (docstring),
+   `test_makefile.py`, `CLAUDE.md`, `_index`, DESIGN and DEFINE. `DESIGN_SCD2_RESTAURANTS.md` is not
+   touched (other feature, under review); its embargo is tied to "until B ends", now 2026-11-30 00:00 UTC.
+
+##### Files
+
+| File | Change |
+|------|--------|
+| `terraform/env/dev.tfvars` | `cost_profile = "baseline"`; `account_monitor_quota = 30`; `owner_user_name = "CHRISTIANDR"`; comments record the price, balance and worst case |
+| `scripts/budget.sql` | `SET_SPENDING_LIMIT(5)`, header and read-back comment |
+| `scripts/verify_governance.sql` | Budget check expects 5 (it was hard-coded to 10: changing `budget.sql` alone would have failed the first apply's verify step with −20005) |
+| `tests/unit/test_sql_scripts.py` | Asserts `SET_SPENDING_LIMIT(5)` |
+| `Makefile` (shared), `CLAUDE.md` (shared), `docs/measurement/{queries.sql,RESULTS_TEMPLATE.md}`, `tests/load/generate_load.py`, `tests/unit/test_makefile.py` | Window dates +24 h (decision 6) |
+| `.env.example` (shared) | `BATCH_WINDOW_MINUTES=0`, to stay equal to `dev.tfvars` on `main` as its comment requires |
+| `scripts/00_terraform_bootstrap.sql` | `DEFAULT_SECONDARY_ROLES = ()` in both `CREATE USER` and an idempotent `ALTER USER … SET`; read-back expects `default_secondary_roles = []` |
+| `tests/unit/test_sql_scripts.py` | + `test_bootstrap_service_users_have_no_secondary_roles` (mutation-checked: removing one `ALTER USER` fails it) |
+| `docs/measurement/PROTOCOL.md` | §4 switches S0–S2; §9 two rows (void dry run and its checks moved to A / B; new limits) |
+| DESIGN 1.5, DEFINE status and A-006, `_index` open item 7 | Records of the above |
+
+##### Commands and results
+
+| Command | Result |
+|---------|--------|
+| `pytest tests/unit -q` · `ruff check .` · `build_sdd_package.py --check` | ✅ 212 passed · ✅ · ✅ up to date |
+| `grep` for the old limits in code, scripts and tests | only historical rows of this report remain |
+
+##### Open issues (closed / new)
+
+| # | Issue | Needed by | Owner |
+|---|-------|-----------|-------|
+| O1 | ~~Credit price~~ — **closed**: USD 4.65 (F15) | — | — |
+| O2 | ~~Probe P1~~ — **closed** with a caveat: ACCOUNTADMIN path confirmed, SYSADMIN half inconclusive (F14) | — | — |
+| O3 | `owner_user_name` — **name fixed**: `CHRISTIANDR`. E-mail present; whether it is *verified* is not shown by `SHOW USERS`, the owner checks it in Snowsight | Before the first apply | Christian |
+| O51 | **Decision 12 assumed an AWS account that did not exist.** The owner chose Snowflake on AWS, which gives no AWS account. Creating one (S3 cost < USD 0.05/month; CloudShell, no CLI install; USD 1 AWS Budget alert) on 2026-11-25, then runbook §1–4. Retro: check every external-account assumption at DEFINE | 2026-11-25 | Christian |
+| O49 | First apply with `DEFAULT_SECONDARY_ROLES = ()`: if a resource on the `sysadmin` or `securityadmin` alias fails with insufficient privileges, that is a real Decision 9 gap. Fix it with the least grant, never by restoring `ALL` | First apply | build-agent |
+| O50 | Retro: is the SYSADMIN half of F14 still true? Rerun P1.1/P1.2 in a session that really has no secondary roles (e.g. `snow sql`). If SYSADMIN can assign monitors, the ACCOUNTADMIN exception for `CDC_WH` can go in v3.1 | Retro | Christian |
+| O21 | `gate_task_timeout_ms` stays at the provisional 10 000 ms for S3: with no dry run there are no serverless gate runs to calibrate it before B | S3 | Christian |
+| O47 | Dry-run checks D3, D5 and the S1 half of D10 need profile B; they are read from the first hours of B (PROTOCOL §9). The rest are read from the first hours of A | Windows A, B | Christian |
+| O48 | The balance view lags up to 24 h; re-read `REMAINING_BALANCE_DAILY` before a rerun raises any limit (Decision 8 rule) | Before a rerun | Christian |
+
+---
+
 #### Next Step
 
 Builder-owned manifest items are all built (1–14, 16–18 and 20; 20 merged in #14, `3ea3c29`, CI green; `test_makefile.py` added to the `_index` ownership map). Item 15 drafted in
 run 7 and merged (#10); item 21 drafted in run 9 and merged (#16, `c46e6f8`, CI green through the new `main` ruleset). Remaining: 19 (runbooks), 22 (README,
-Day 14) — owner-authored. **Needed before S0 / the dry run (2026-11-24 12:00 UTC):** credit price (O1), state
+Day 14) — owner-authored. **Needed before window A (2026-11-26 00:00 UTC; the dry run is void and the measurement postponed, run 10):** AWS account (O51), state
 backend bootstrap, Terraform identities, the rest of the repository variables and every secret (O39), then the first apply
 through CI with approval (O43).
 When every manifest item is built: `/sdd-validate COST_GOVERNANCE` in a fresh chat.

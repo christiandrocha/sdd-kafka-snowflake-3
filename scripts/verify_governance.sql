@@ -100,7 +100,7 @@ DECLARE
     tier VARCHAR;
     actions INTEGER DEFAULT 0;
     valid_actions INTEGER DEFAULT 0;
-    budget_failed EXCEPTION (-20005, 'Budget check failed: CDC_BUDGET limit is not 10, tier is not TIER_1H, or its custom action is missing or invalid');
+    budget_failed EXCEPTION (-20005, 'Budget check failed: CDC_BUDGET limit is not 5, tier is not TIER_1H, or its custom action is missing or invalid');
 BEGIN
     CALL CDC_POC.CONFIG.CDC_BUDGET!GET_SPENDING_LIMIT();
     SELECT $1 INTO :spending_limit FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
@@ -109,10 +109,10 @@ BEGIN
     CALL CDC_POC.CONFIG.CDC_BUDGET!CONFIRM_CUSTOM_ACTIONS_ACCESS();
     SELECT COUNT(*), COUNT_IF("IS_VALID") INTO :actions, :valid_actions
       FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
-    IF (spending_limit <> 10 OR tier <> 'TIER_1H' OR actions < 1 OR valid_actions <> actions) THEN
+    IF (spending_limit <> 5 OR tier <> 'TIER_1H' OR actions < 1 OR valid_actions <> actions) THEN
         RAISE budget_failed;
     END IF;
-    RETURN 'Budget OK: limit 10, TIER_1H, ' || actions || ' valid custom action(s)';
+    RETURN 'Budget OK: limit 5, TIER_1H, ' || actions || ' valid custom action(s)';
 END;
 $$;
 

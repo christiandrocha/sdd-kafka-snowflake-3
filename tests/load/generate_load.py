@@ -54,7 +54,7 @@ TASK-STATE CHECK (Decision 5)
 
 USAGE
   python tests/load/generate_load.py --window A \\
-      --start 2026-11-25T00:00Z --end 2026-11-27T00:00Z --out docs/measurement/runs/A
+      --start 2026-11-26T00:00Z --end 2026-11-28T00:00Z --out docs/measurement/runs/A
   python tests/load/generate_load.py --window A --start … --end … --out … --plan-only
 
   Environment: LOAD_SEED, LOAD_CLUSTER_MINUTES, LOAD_BURST_OFFSETS,

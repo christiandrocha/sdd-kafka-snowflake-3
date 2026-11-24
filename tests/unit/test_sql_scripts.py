@@ -121,7 +121,7 @@ def test_budget_is_idempotent_and_matches_design():
     assert "CREATE SNOWFLAKE.CORE.BUDGET IF NOT EXISTS" in sql
     assert sql.index("REMOVE_CUSTOM_ACTIONS()") < sql.index("ADD_CUSTOM_ACTION(")
     assert re.search(r"'ACTUAL',\s*100\)", sql)  # Decision 5
-    assert "SET_SPENDING_LIMIT(10)" in sql  # Decision 8
+    assert "SET_SPENDING_LIMIT(5)" in sql  # Decision 8 (DESIGN 1.5)
     assert "SET_REFRESH_TIER('TIER_1H')" in sql  # F8, owner decision
     assert "REMOVE_CYCLE_START_ACTION()" in sql  # no cycle-start action
     assert "SET_CYCLE_START_ACTION" not in sql
@@ -171,3 +171,15 @@ def test_budget_grants_viewer_to_the_plan_role():
         " TO ROLE TERRAFORM_PLAN_ROLE;"
         in _sql("budget.sql")
     )
+
+
+def test_bootstrap_service_users_have_no_secondary_roles():
+    """DESIGN 1.5, F14: with the default ('ALL'), the `sysadmin` provider alias
+    would act with every role granted to TERRAFORM_SVC, ACCOUNTADMIN included."""
+    sql = _sql("00_terraform_bootstrap.sql")
+    for user in ("TERRAFORM_SVC", "TERRAFORM_PLAN_SVC"):
+        create = re.search(rf"CREATE USER IF NOT EXISTS {user}\b(.*?);", sql, re.S)
+        assert create and re.search(r"DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)", create.group(1)), user
+        alter = rf"ALTER USER {user}\s+SET DEFAULT_SECONDARY_ROLES\s*=\s*\(\s*\)\s*;"
+        assert re.search(alter, sql), user
+    assert "'ALL'" not in sql

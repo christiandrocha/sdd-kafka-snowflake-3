@@ -24,7 +24,14 @@
 -- secrets and nowhere else. Never commit this file with a real key filled in —
 -- edit a local copy.
 --
--- SAFE TO RE-RUN: every statement is IF NOT EXISTS or an idempotent GRANT.
+-- SECONDARY ROLES: both service users get DEFAULT_SECONDARY_ROLES = (). New
+-- users default to ('ALL'): every granted role then counts for privilege
+-- checks, so the provider's `sysadmin` alias would silently act with
+-- ACCOUNTADMIN's privileges and Decision 9 would hold only in the code. With
+-- () each alias has exactly the role it names (DESIGN 1.5, F14).
+--
+-- SAFE TO RE-RUN: every statement is IF NOT EXISTS, an idempotent GRANT or an
+-- idempotent ALTER USER ... SET.
 -- ------------------------------------------------------------------------
 
 USE ROLE ACCOUNTADMIN;
@@ -39,14 +46,20 @@ CREATE ROLE IF NOT EXISTS TERRAFORM_PLAN_ROLE
 CREATE USER IF NOT EXISTS TERRAFORM_SVC
     TYPE           = SERVICE
     DEFAULT_ROLE   = SYSADMIN
+    DEFAULT_SECONDARY_ROLES = ()
     RSA_PUBLIC_KEY = '<PASTE_TERRAFORM_SVC_PUBLIC_KEY>'
     COMMENT        = 'Terraform apply (CI environment snowflake-dev). DESIGN_COST_GOVERNANCE Decision 9.';
 
 CREATE USER IF NOT EXISTS TERRAFORM_PLAN_SVC
     TYPE           = SERVICE
     DEFAULT_ROLE   = TERRAFORM_PLAN_ROLE
+    DEFAULT_SECONDARY_ROLES = ()
     RSA_PUBLIC_KEY = '<PASTE_TERRAFORM_PLAN_SVC_PUBLIC_KEY>'
     COMMENT        = 'Terraform plan in PRs (CI environment snowflake-plan). Read-only.';
+
+-- CREATE ... IF NOT EXISTS skips users that already exist: enforce it anyway.
+ALTER USER TERRAFORM_SVC      SET DEFAULT_SECONDARY_ROLES = ();
+ALTER USER TERRAFORM_PLAN_SVC SET DEFAULT_SECONDARY_ROLES = ();
 
 -- Grants ------------------------------------------------------------------
 USE ROLE SECURITYADMIN;
@@ -61,7 +74,8 @@ USE ROLE ACCOUNTADMIN;
 -- SNOWFLAKE database-role grants (DESIGN Decision 9, named exception; F14).
 GRANT ROLE ACCOUNTADMIN TO USER TERRAFORM_SVC;
 
--- Read-back (expected: both users TYPE = SERVICE, has_rsa_public_key = true) --
+-- Read-back (expected: both users TYPE = SERVICE, has_rsa_public_key = true,
+-- default_secondary_roles = []) ------------------------------------------------
 SHOW USERS LIKE 'TERRAFORM%';
 SHOW GRANTS TO USER TERRAFORM_SVC;       -- SYSADMIN, SECURITYADMIN, ACCOUNTADMIN
 SHOW GRANTS TO USER TERRAFORM_PLAN_SVC;  -- TERRAFORM_PLAN_ROLE only
